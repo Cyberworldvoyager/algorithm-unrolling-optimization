@@ -1,4 +1,4 @@
-# 算法展开求解连续优化问题
+# 算法展开求解 LASSO 问题 — 维度无关 LISTA
 
 **深度学习大作业**
 
@@ -6,16 +6,18 @@
 
 ## 摘要
 
-本项目探索算法展开 (Algorithm Unrolling) 技术，将经典迭代优化算法展开为可学习的神经网络。我们系统地实现了三种优化问题的展开方案：LASSO 稀疏编码 (LISTA)、低秩矩阵恢复 (ADMM-Net) 和二次规划 (PGD-Net)。
+本项目探索算法展开 (Algorithm Unrolling) 技术，将经典 ISTA 算法展开为可学习的神经网络。
 
 **核心贡献**：
-1. 提出 **LISTA-Momentum** 架构，通过可学习动量机制提升收敛速度
-2. 设计**维度无关 LISTA**，可处理任意维度输入，无需重新训练
-3. 提供**谱半径稳定性验证**和**参数矩阵分析**
+1. 提出 **LISTA-Momentum** 架构，通过可学习动量机制解决泛化性问题
+2. 设计 **维度无关 LISTA**，可处理任意维度输入，无需重新训练
+3. 提供 **谱半径稳定性验证** 和 **参数矩阵分析**
 
-**实验结果**：LISTA-Momentum 在分布内 (ID) 和分布外 (OOD) 测试中均优于经典 ISTA 算法，泛化退化仅 1.06×。维度无关 LISTA 在训练维度范围内性能提升 3.77-8.72×。
+**实验结果**：
+- LISTA-Momentum 泛化退化仅 1.06×，在 ID 和 OOD 上都优于 ISTA
+- 维度无关 LISTA 在训练维度范围内性能提升 3.77-8.72×
 
-**关键词**: 算法展开, LISTA, 优化算法, 深度学习, 泛化性
+**关键词**: 算法展开, LISTA, LASSO, 维度无关, 泛化性
 
 ---
 
@@ -23,28 +25,31 @@
 
 ### 1.1 研究背景
 
-迭代优化算法是机器学习和信号处理的基础工具。然而，传统算法通常需要大量迭代才能收敛，计算成本高昂。**算法展开 (Algorithm Unrolling)** 是一种将迭代算法转化为深度网络的技术，通过学习算法参数来加速收敛 (Gregor & LeCun, 2010; Monga et al., 2021)。
+LASSO (Least Absolute Shrinkage and Selection Operator) 是稀疏信号恢复中的核心优化问题：
 
-算法展开的核心思想是将迭代算法的每一步展开为网络的一层，并将算法中的关键参数设为可学习参数。这样，网络可以通过端到端训练学习到更优的参数，从而在更少的迭代次数内达到同等或更好的精度。
+$$\min_x \frac{1}{2} \|Ax - b\|^2 + \lambda \|x\|_1$$
+
+其中 $A \in \mathbb{R}^{m \times n}$ 是测量矩阵，$b \in \mathbb{R}^m$ 是观测，$\lambda$ 是正则化参数。
+
+经典 ISTA (Iterative Shrinkage-Thresholding Algorithm) 算法通过迭代求解：
+
+$$x_{k+1} = \text{SoftThreshold}(x_k - \eta A^T(Ax_k - b), \eta\lambda)$$
+
+**问题**：ISTA 需要很多次迭代才能收敛，计算成本高。
+
+**解决方案**：将 ISTA 展开为神经网络，学习更好的参数，从而在更少的迭代次数内达到同等精度。
 
 ### 1.2 研究目标
 
-本项目系统实现三种经典优化算法的展开网络：
-1. **LASSO 稀疏编码** — LISTA 及其变体
-2. **低秩矩阵恢复** — ADMM-Net 及其变体
-3. **二次规划** — PGD-Net 及其变体
-
-同时，我们重点关注以下问题：
-- **泛化性**: 展开网络能否泛化到未见过的问题实例？
-- **维度无关性**: 能否设计一个网络处理不同维度的输入？
-- **理论分析**: 展开网络的稳定性和收敛性如何？
+1. **泛化性**: 展开网络能否泛化到未见过的问题实例？
+2. **维度无关性**: 能否设计一个网络处理不同维度的输入？
+3. **理论分析**: 展开网络的稳定性和收敛性如何？
 
 ### 1.3 主要贡献
 
 1. **LISTA-Momentum**: 提出带可学习动量的 LISTA 变体，解决泛化性问题
 2. **维度无关 LISTA**: 设计维度无关架构，可处理任意维度输入
 3. **理论分析**: 提供谱半径稳定性验证和参数矩阵分析
-4. **系统实验**: 在多个问题上进行全面的对比实验和消融实验
 
 ---
 
@@ -52,66 +57,66 @@
 
 ### 2.1 近端算子
 
-近端算子 (Proximal Operator) 是求解非光滑优化问题的关键工具 (Parikh & Boyd, 2014)：
+近端算子 (Proximal Operator) 是求解非光滑优化问题的关键工具：
 
 $$\text{prox}_{\lambda f}(v) = \arg\min_x \left( f(x) + \frac{1}{2\lambda} \|x - v\|^2 \right)$$
 
-常见的近端算子包括：
-- **L1 近端算子 (软阈值)**: $\text{prox}_{\lambda|\cdot|_1}(v)_i = \text{sign}(v_i) \max(|v_i| - \lambda, 0)$
-- **核范数近端算子 (奇异值阈值化)**: $D_\tau(X) = U \text{diag}(\max(\sigma_i - \tau, 0)) V^T$
+对于 L1 正则化，近端算子即为软阈值函数：
 
-### 2.2 投影算子
+$$\text{prox}_{\lambda|\cdot|_1}(v)_i = \text{sign}(v_i) \max(|v_i| - \lambda, 0)$$
 
-投影到凸集 $C$ 上：
+### 2.2 ISTA 算法
 
-$$\text{Proj}_C(x) = \arg\min_{y \in C} \|y - x\|^2$$
+ISTA (Iterative Shrinkage-Thresholding Algorithm) 求解 LASSO 问题：
 
-常见约束的投影：
-- **Box 约束**: $\text{Proj}_{[l,u]}(x) = \text{clamp}(x, l, u)$
-- **单纯形约束**: 排序投影算法 (Duchi et al., 2008)
+$$x_{k+1} = \text{SoftThreshold}(x_k - \eta A^T(Ax_k - b), \eta\lambda)$$
 
-### 2.3 ADMM 算法
+其中 $\eta$ 是步长，通常取 $\eta = 1/L$，$L = \|A^TA\|_2$ 是 Lipschitz 常数。
 
-交替方向乘子法 (ADMM) 求解 (Boyd et al., 2011)：
+**收敛率**: $\|x_k - x^*\| = O(1/k)$
 
-$$\min_{x,z} f(x) + g(z) \quad \text{s.t.} \quad Ax + Bz = c$$
+### 2.3 FISTA 算法
 
-迭代步骤：
-1. $x^{k+1} = \arg\min_x L_\rho(x, z^k, y^k)$
-2. $z^{k+1} = \arg\min_z L_\rho(x^{k+1}, z, y^k)$
-3. $y^{k+1} = y^k + \rho(Ax^{k+1} + Bz^{k+1} - c)$
+FISTA (Fast ISTA) 通过 Nesterov 动量加速：
+
+$$y_k = x_k + \frac{k-1}{k+2}(x_k - x_{k-1})$$
+$$x_{k+1} = \text{SoftThreshold}(y_k - \eta A^T(Ay_k - b), \eta\lambda)$$
+
+**收敛率**: $\|x_k - x^*\| = O(1/k^2)$
 
 ---
 
 ## 3. 展开方法
 
-### 3.1 LASSO 问题 — LISTA 及其变体
+### 3.1 LISTA (Gregor & LeCun, 2010)
 
-**优化问题**:
-$$\min_x \frac{1}{2} \|Ax - b\|^2 + \lambda \|x\|_1$$
-
-**ISTA 迭代** (Beck & Teboulle, 2009):
-$$x_{k+1} = \text{SoftThreshold}(x_k - \eta A^T(Ax_k - b), \eta\lambda)$$
-
-#### 3.1.1 LISTA (Gregor & LeCun, 2010)
-
-将 T 次 ISTA 迭代展开为 T 层网络，每层参数 $W_1, W_2, \theta$ 可学习：
+**核心思想**: 将 T 次 ISTA 迭代展开为 T 层网络，每层参数 $W_1, W_2, \theta$ 可学习：
 
 $$x_{k+1} = \sigma(W_1 b + W_2 x_k; \theta_k)$$
 
-#### 3.1.2 LISTA-CP (Chen et al., 2018)
+其中 $\sigma(\cdot; \theta)$ 是参数为 $\theta$ 的软阈值函数。
+
+**问题**: $W_1, W_2$ 是固定的，无法泛化到新的 $A$ 矩阵。
+
+### 3.2 LISTA-CP (Chen et al., 2018)
 
 **核心改进**: 耦合权重，用 $B$ 参数化 $W_1$ 和 $W_2$：
 
 $$W_1 = \eta B, \quad W_2 = I - \eta BA$$
 
+更新公式变为：
+
+$$x_{k+1} = \sigma(\eta B b + (I - \eta BA)x_k; \theta_k)$$
+
 **优势**: 参数量从 $O(nm + n^2)$ 降到 $O(nm)$
 
 **问题**: $B$ 绑定到训练矩阵 $A_{train}$，无法泛化到新的 $A$
 
-#### 3.1.3 LISTA-Momentum (本文提出)
+### 3.3 LISTA-Momentum (本文提出)
 
-**核心创新**: 引入可学习动量，模拟 FISTA 的加速效果：
+**核心创新**: 引入可学习动量，模拟 FISTA 的加速效果，并解决泛化性问题。
+
+#### 3.3.1 数学公式
 
 $$\boxed{
 \begin{aligned}
@@ -121,38 +126,218 @@ x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot W g_k; \theta) \quad &\text{(�
 \end{aligned}
 }$$
 
-**关键设计**:
+#### 3.3.2 参数说明
+
+| 参数 | 维度 | 作用 | 初始化 |
+|------|------|------|--------|
+| $W$ | $n \times n$ | 梯度变换矩阵 | 单位矩阵 $I$ |
+| $\eta$ | 标量 | 步长 | 0.1 |
+| $\beta$ | 标量 | 动量参数 | 0.0 (sigmoid 后为 0.5) |
+| $\theta$ | 标量 | 阈值 | 0.1 |
+
+#### 3.3.3 关键设计
+
 1. **不把 A 固化在权重中**: 每层用当前 A 计算梯度
 2. **学习通用的梯度变换规则 W**: 与 A 无关
 3. **可学习的动量参数 β**: 自适应加速
 
-#### 3.1.4 维度无关 LISTA
+#### 3.3.4 PyTorch 实现
 
-**核心创新**: 设计维度无关架构，可处理任意维度输入：
+```python
+class LISTAMomentumLayer(nn.Module):
+    def __init__(self, m, n):
+        super().__init__()
+        # 可学习的梯度变换矩阵 W
+        self.W = nn.Linear(n, n, bias=False)
+        nn.init.eye_(self.W.weight)  # 初始化为单位矩阵
 
+        # 可学习的步长和动量
+        self.eta = nn.Parameter(torch.tensor(0.1))
+        self.beta = nn.Parameter(torch.tensor(0.0))
+
+        # 可学习的阈值
+        self.threshold = nn.Parameter(torch.tensor(0.1))
+
+    def forward(self, b, x, x_prev, A):
+        # 动量外推: y = x + sigmoid(β) * (x - x_prev)
+        beta = torch.sigmoid(self.beta)
+        y = x + beta * (x - x_prev)
+
+        # 用当前 A 计算梯度: g = A^T (A y - b)
+        Ay = torch.bmm(A, y.unsqueeze(-1)).squeeze(-1)
+        residual = Ay - b
+        grad = torch.bmm(A.transpose(1, 2), residual.unsqueeze(-1)).squeeze(-1)
+
+        # 可学习的梯度变换: z = y - η * W * g
+        transformed_grad = self.W(grad)
+        z = y - self.eta * transformed_grad
+
+        # 软阈值化: x_new = sign(z) * max(|z| - θ, 0)
+        return torch.sign(z) * torch.maximum(
+            torch.abs(z) - self.threshold, torch.zeros_like(z))
+```
+
+### 3.4 维度无关 LISTA (本文提出)
+
+**核心问题**: LISTA-Momentum 使用 `nn.Linear(n, n)` 作为梯度变换矩阵 W，维度 n 是固定的。当问题维度变化时，需要重新训练。
+
+**核心创新**: 设计维度无关架构，可处理任意维度输入。
+
+#### 3.4.1 设计思路
+
+**关键洞察**: 梯度变换 $W$ 应该与维度 $n$ 无关。
+
+**解决方案**:
 1. **LayerNorm 归一化**: 消除维度影响
 2. **共享 MLP 变换**: 对每个元素应用相同的变换
 3. **缩放因子**: 恢复归一化前的尺度
 
-### 3.2 低秩矩阵恢复 — ADMM-Net
+#### 3.4.2 数学公式
 
-**优化问题**:
-$$\min_X \|X\|_* \quad \text{s.t.} \quad P_\Omega(X) = P_\Omega(M)$$
+$$\boxed{
+\begin{aligned}
+y_k &= x_k + \sigma(\beta) \cdot (x_k - x_{k-1}) \quad &\text{(动量外推)} \\
+g_k &= A^T(A y_k - b) \quad &\text{(用当前 A 计算梯度)} \\
+\bar{g}_k &= \text{LayerNorm}(g_k) \quad &\text{(归一化，消除维度影响)} \\
+\hat{g}_k &= \text{MLP}(\bar{g}_k) \quad &\text{(共享变换，维度无关)} \\
+x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot \hat{g}_k \cdot \text{std}(g_k); \theta) \quad &\text{(恢复尺度)}
+\end{aligned}
+}$$
 
-**ADMM-Net 展开** (Sun et al., 2016):
-- ADMMNet: 基本 ADMM 展开
-- ADMMNetV2: 增加可学习线性变换
-- SoftImputeNet: Soft-Impute 展开
+#### 3.4.3 关键组件
 
-### 3.3 二次规划 — PGD-Net
+**1. LayerNorm 归一化**
 
-**优化问题**:
-$$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
+$$\bar{g} = \frac{g - \mu(g)}{\sigma(g) + \epsilon}$$
 
-**PGD-Net 展开**:
-- PGDNet: 基本 PGD 展开
-- PGDMomentumNet: 带 Nesterov 动量
-- PGDLearnedQNet: 学习 Q 矩阵修正
+作用: 消除维度 $n$ 的影响，使变换与维度无关。
+
+**2. 共享 MLP 变换**
+
+```python
+self.transform = nn.Sequential(
+    nn.Linear(1, hidden_dim),
+    nn.GELU(),
+    nn.Linear(hidden_dim, 1),
+)
+```
+
+作用: 对每个元素应用相同的变换，参数量与维度 $n$ 无关。
+
+**3. 缩放因子**
+
+$$\hat{g} = \text{MLP}(\bar{g}) \cdot \sigma(g)$$
+
+作用: 恢复归一化前的尺度。
+
+#### 3.4.4 完整 PyTorch 实现
+
+```python
+class DimensionAgnosticLayer(nn.Module):
+    """维度无关的 LISTA-Momentum 单层。
+
+    核心设计:
+    1. 用 LayerNorm 归一化梯度 (消除维度影响)
+    2. 用共享的 MLP 变换 (维度无关)
+    3. 用可学习的缩放因子恢复尺度
+    """
+
+    def __init__(self, hidden_dim: int = 32):
+        super().__init__()
+
+        # 梯度变换网络 (维度无关)
+        self.transform = nn.Sequential(
+            nn.Linear(1, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+        # 可学习的步长和动量
+        self.eta = nn.Parameter(torch.tensor(0.1))
+        self.beta = nn.Parameter(torch.tensor(0.0))
+
+        # 可学习的阈值
+        self.threshold = nn.Parameter(torch.tensor(0.1))
+
+        # 可学习的缩放因子
+        self.scale = nn.Parameter(torch.tensor(1.0))
+
+    def forward(self, b, x, x_prev, A):
+        # 动量外推
+        beta = torch.sigmoid(self.beta)
+        y = x + beta * (x - x_prev)
+
+        # 用当前 A 计算梯度: g = A^T (A y - b)
+        Ay = torch.bmm(A, y.unsqueeze(-1)).squeeze(-1)
+        residual = Ay - b
+        grad = torch.bmm(A.transpose(1, 2), residual.unsqueeze(-1)).squeeze(-1)
+
+        # 维度无关的梯度变换
+        batch_size, n = grad.shape
+
+        # 1. 归一化 (消除维度影响)
+        grad_mean = grad.mean(dim=-1, keepdim=True)
+        grad_std = grad.std(dim=-1, keepdim=True) + 1e-6
+        grad_normalized = (grad - grad_mean) / grad_std
+
+        # 2. 元素独立变换 (共享权重)
+        grad_flat = grad_normalized.reshape(-1, 1)  # (batch*n, 1)
+        transformed_flat = self.transform(grad_flat)  # (batch*n, 1)
+        transformed_normalized = transformed_flat.reshape(batch_size, n)  # (batch, n)
+
+        # 3. 恢复尺度 + 残差连接
+        transformed_grad = (transformed_normalized + grad_normalized) * grad_std * self.scale
+
+        # 更新
+        z = y - self.eta * transformed_grad
+
+        # 软阈值化
+        return torch.sign(z) * torch.maximum(
+            torch.abs(z) - self.threshold, torch.zeros_like(z))
+
+
+class DimensionAgnosticLISTA(nn.Module):
+    """维度无关的 LISTA-Momentum。
+
+    可以处理不同维度的 A 矩阵，无需重新训练。
+    """
+
+    def __init__(self, T: int = 10, hidden_dim: int = 32):
+        super().__init__()
+        self.T = T
+        self.layers = nn.ModuleList([
+            DimensionAgnosticLayer(hidden_dim) for _ in range(T)
+        ])
+
+    def forward(self, b, A, x0=None):
+        batch_size = b.shape[0]
+        if A.dim() == 2:
+            A = A.unsqueeze(0).expand(batch_size, -1, -1)
+
+        n = A.shape[2]
+        x = x0 if x0 is not None else torch.zeros(batch_size, n, device=b.device)
+        x_prev = x.clone()
+
+        for layer in self.layers:
+            x_new = layer(b, x, x_prev, A)
+            x_prev = x
+            x = x_new
+
+        return x
+```
+
+#### 3.4.5 参数量分析
+
+| 组件 | 参数量 | 说明 |
+|------|--------|------|
+| MLP | $3 \times \text{hidden\_dim} + 2$ | 与维度 $n$ 无关 |
+| $\eta, \beta, \theta, \scale$ | 4 | 标量参数 |
+| 每层总计 | $3 \times \text{hidden\_dim} + 6$ | 固定 |
+| T 层总计 | $T \times (3 \times \text{hidden\_dim} + 6)$ | 固定 |
+
+**关键**: 参数量与维度 $n$ 无关，因此可以处理任意维度的输入。
 
 ---
 
@@ -160,19 +345,10 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 
 ### 4.1 数据生成
 
-**LASSO**:
+**LASSO 问题**:
 - 测量矩阵 $A \in \mathbb{R}^{m \times n}$，列归一化
 - 稀疏信号 $x$，稀疏度 $s = 10$
 - 观测 $b = Ax + \epsilon$，$\epsilon \sim \mathcal{N}(0, 0.001^2)$
-
-**低秩矩阵**:
-- 低秩矩阵 $M = UV^T$，$U \in \mathbb{R}^{m \times r}$，$V \in \mathbb{R}^{n \times r}$
-- 观测掩码 $\Omega$，观测比例 50%
-
-**二次规划**:
-- 正定矩阵 $Q$，条件数 $\kappa = 10$
-- 线性项 $c \sim \mathcal{N}(0, I)$
-- Box 约束: $[0, 1]^n$
 
 ### 4.2 训练配置
 
@@ -180,7 +356,7 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 |------|-----|
 | 优化器 | Adam |
 | 学习率 | 1e-3 |
-| 学习率调度 | ReduceLROnPlateau |
+| 学习率调度 | CosineAnnealingLR |
 | 梯度裁剪 | max_norm=1.0 |
 | 早停 | patience=20 |
 | 批大小 | 64 |
@@ -191,10 +367,7 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 ### 4.3 评估指标
 
 - **相对误差**: $\|x_{true} - x_{pred}\| / \|x_{true}\|$
-- **支撑集恢复率** (LASSO)
-- **秩恢复** (低秩矩阵)
-- **约束违反度** (QP)
-- **最优性差距**: $(f(x) - f^*) / |f^*|$
+- **支撑集恢复率**: $|\text{supp}(x_{true}) \cap \text{supp}(x_{pred})| / |\text{supp}(x_{true})|$
 - **推理时间**: 墙钟时间 (ms)
 - **谱半径**: $\rho(W_2) = \max_i |\lambda_i(I - \eta BA)|$
 
@@ -202,7 +375,7 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 
 ## 5. 实验结果
 
-### 5.1 LASSO 实验
+### 5.1 LISTA-Momentum 泛化性实验
 
 #### 5.1.1 公平比较 (相同迭代次数)
 
@@ -227,20 +400,9 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 
 **关键发现**: LISTA-Momentum 在 ID 和 OOD 上都优于 ISTA，泛化退化仅 1.06×！
 
-#### 5.1.3 噪声鲁棒性
+### 5.2 维度无关 LISTA 实验
 
-| 噪声水平 σ | LISTA-Momentum | ISTA | vs ISTA |
-|-----------|----------------|------|---------|
-| 0.001 | 0.542 | 0.843 | 1.55× |
-| 0.005 | 0.543 | 0.843 | 1.55× |
-| 0.010 | 0.543 | 0.843 | 1.55× |
-| 0.020 | 0.546 | 0.843 | 1.54× |
-| 0.050 | 0.562 | 0.843 | 1.50× |
-| 0.100 | 0.610 | 0.843 | 1.38× |
-
-**分析**: LISTA-Momentum 在所有噪声水平下都优于 ISTA，鲁棒性良好。
-
-### 5.2 维度泛化实验
+#### 5.2.1 维度泛化结果
 
 | 维度 n | ISTA | LISTA-DimAgnostic | vs ISTA | 说明 |
 |--------|------|-------------------|---------|------|
@@ -252,6 +414,12 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 
 **突破性结果**: 维度无关 LISTA 在训练维度范围内显著优于 ISTA (3.77-8.72×)！
 
+#### 5.2.2 关键发现
+
+1. **维度无关架构完全成功**: 模型可以处理任意维度的输入，无需重新训练
+2. **训练维度性能优异**: 在 n=50 到 n=300 上，LISTA 显著优于 ISTA
+3. **泛化边界**: 如果维度超出训练范围，性能会下降
+
 ### 5.3 参数矩阵 W 分析
 
 | 层 | 与 I 的余弦相似度 | 谱半径 | 条件数 | 有效秩 |
@@ -261,9 +429,23 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 | 10 | 0.964 | 1.426 | 2.29 | 200 |
 
 **发现**:
-1. W 接近单位矩阵 (余弦相似度 0.915-0.964)
-2. 谱半径 > 1，但网络仍然有效
-3. 有效秩 = 200 (满秩)
+1. **W 接近单位矩阵**: 余弦相似度 0.915-0.964，说明 W 在 ISTA 的基础上做小幅调整
+2. **谱半径 > 1**: 1.42-1.54，但网络仍然有效，说明谱半径条件是充分非必要
+3. **有效秩 = 200**: W 是满秩的，说明它学习了完整的梯度变换
+4. **W 随层数演化**: 与 I 的距离从 6.47 降到 4.46，说明后面的层更接近 ISTA
+
+### 5.4 噪声鲁棒性
+
+| 噪声水平 σ | LISTA-Momentum | ISTA | vs ISTA |
+|-----------|----------------|------|---------|
+| 0.001 | 0.542 | 0.843 | 1.55× |
+| 0.005 | 0.543 | 0.843 | 1.55× |
+| 0.010 | 0.543 | 0.843 | 1.55× |
+| 0.020 | 0.546 | 0.843 | 1.54× |
+| 0.050 | 0.562 | 0.843 | 1.50× |
+| 0.100 | 0.610 | 0.843 | 1.38× |
+
+**分析**: LISTA-Momentum 在所有噪声水平下都优于 ISTA，鲁棒性良好。
 
 ---
 
@@ -288,7 +470,7 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 
 **分析**: 问题结构初始化 (B = A^T) 显著加速收敛。
 
-### 6.3 泛化性分析
+### 6.3 泛化性总结
 
 | 维度 | 能否泛化 | 实验结果 | 说明 |
 |------|---------|---------|------|
@@ -316,15 +498,15 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 
 ### 7.3 局限性
 
-1. **维度固定**: 原始 LISTA-CP 只能处理固定维度
+1. **训练维度范围**: 维度无关 LISTA 只在训练维度范围内有效
 2. **训练成本**: 需要大量同类问题的数据
 3. **理论保证**: 缺乏收敛性的严格证明
 
 ### 7.4 未来工作
 
-1. **扩展验证**: 在更大规模问题上验证
+1. **扩展维度范围**: 在更大维度范围内训练
 2. **理论分析**: 研究收敛性和泛化性
-3. **应用推广**: 将通用架构思想应用到 ADMM-Net 和 PGD-Net
+3. **应用推广**: 将维度无关思想应用到其他问题
 
 ---
 
@@ -333,13 +515,10 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 1. Gregor, K., & LeCun, Y. (2010). Learning fast approximations of sparse coding. In *ICML*.
 2. Chen, X., Liu, J., Wang, Z., & Yin, W. (2018). Theoretical linear convergence of unfolded ISTA and its practical weights and thresholds. In *NeurIPS*.
 3. Beck, A., & Teboulle, M. (2009). A fast iterative shrinkage-thresholding algorithm for linear inverse problems. *SIAM Journal on Imaging Sciences*, 2(1), 183-202.
-4. Boyd, S., Parikh, N., Chu, E., Peleato, B., & Eckstein, J. (2011). Distributed optimization and statistical learning via the alternating direction method of multipliers. *Foundations and Trends in Machine Learning*, 3(1), 1-122.
-5. Parikh, N., & Boyd, S. (2014). Proximal algorithms. *Foundations and Trends in Optimization*, 1(3), 127-239.
-6. Duchi, J., Shalev-Shwartz, S., Singer, Y., & Chandra, T. (2008). Efficient projections onto the ℓ1-ball for learning in high dimensions. In *ICML*.
-7. Monga, V., Li, Y., & Eldar, Y. C. (2021). Algorithm unrolling: Interpretable, efficient deep learning for signal and image processing. *IEEE Signal Processing Magazine*, 38(2), 18-44.
-8. Sun, J., Li, H., & Xu, Z. (2016). Deep ADMM-Net for compressive sensing MRI. In *NeurIPS*.
-9. Andrychowicz, M., Denil, M., Gomez, S., Hoffman, M. W., Pfau, D., Schaul, T., & de Freitas, N. (2016). Learning to learn by gradient descent by gradient descent. In *NeurIPS*.
-10. Borgerding, M., Schniter, P., & Rangan, S. (2017). AMP-inspired deep networks for sparse linear inverse problems. *IEEE Transactions on Signal Processing*, 65(18), 4293-4308.
+4. Parikh, N., & Boyd, S. (2014). Proximal algorithms. *Foundations and Trends in Optimization*, 1(3), 127-239.
+5. Monga, V., Li, Y., & Eldar, Y. C. (2021). Algorithm unrolling: Interpretable, efficient deep learning for signal and image processing. *IEEE Signal Processing Magazine*, 38(2), 18-44.
+6. Andrychowicz, M., et al. (2016). Learning to learn by gradient descent by gradient descent. In *NeurIPS*.
+7. Borgerding, M., Schniter, P., & Rangan, S. (2017). AMP-inspired deep networks for sparse linear inverse problems. *IEEE Transactions on Signal Processing*, 65(18), 4293-4308.
 
 ---
 
@@ -355,23 +534,12 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C$$
 # 安装依赖
 pip install -r requirements.txt
 
-# 运行 LASSO 实验
+# 运行 LISTA-Momentum 实验
 cd lasso && python train.py
 
 # 运行维度无关 LISTA 实验
 python train_dimension_agnostic_robust.py
 
-# 运行低秩实验
-cd low_rank && python train.py
-
-# 运行 QP 实验
-cd qp && python train.py
+# 运行综合实验
+jupyter notebook experiment.ipynb
 ```
-
-### C. 参数设置
-
-所有实验参数可在各模块的 `train.py` 文件中调整。主要参数：
-- T: 展开层数 (默认 10)
-- hidden_dim: 隐藏层维度 (默认 32)
-- lr: 学习率 (默认 1e-3)
-- num_epochs: 训练轮次 (默认 100)

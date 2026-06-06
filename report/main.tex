@@ -54,7 +54,7 @@
 \newtheorem{definition}[theorem]{Definition}
 
 % 标题信息
-\title{Algorithm Unrolling for Continuous Optimization Problems\\
+\title{Algorithm Unrolling for LASSO Problem: Dimension-Agnostic LISTA\\
 \large Deep Learning Course Project}
 
 \author{Student Name\\
@@ -67,19 +67,19 @@
 \maketitle
 
 \begin{abstract}
-This project explores \textbf{Algorithm Unrolling} techniques, transforming classical iterative optimization algorithms into learnable neural networks. We systematically implement three unrolled architectures: LISTA for LASSO sparse coding, ADMM-Net for low-rank matrix recovery, and PGD-Net for quadratic programming.
+This project explores \textbf{Algorithm Unrolling} techniques for the LASSO sparse coding problem. We transform the classical ISTA algorithm into a learnable neural network.
 
 \textbf{Core contributions}:
 \begin{enumerate}
-    \item Propose \textbf{LISTA-Momentum} with learnable momentum mechanism to improve convergence
-    \item Design \textbf{dimension-agnostic LISTA} that can handle arbitrary input dimensions
+    \item Propose \textbf{LISTA-Momentum} with learnable momentum to solve generalization
+    \item Design \textbf{dimension-agnostic LISTA} that handles arbitrary input dimensions
     \item Provide \textbf{spectral radius stability verification} and \textbf{parameter matrix analysis}
 \end{enumerate}
 
-\textbf{Results}: LISTA-Momentum outperforms classical ISTA on both in-distribution (ID) and out-of-distribution (OOD) tests, with only 1.06× generalization degradation. Dimension-agnostic LISTA achieves 3.77-8.72× performance improvement within training dimension range.
+\textbf{Results}: LISTA-Momentum achieves only 1.06× generalization degradation, outperforming ISTA on both ID and OOD. Dimension-agnostic LISTA achieves 3.77-8.72× performance improvement within training dimension range.
 
 \bigskip
-\noindent\textbf{Keywords:} Algorithm Unrolling, LISTA, Optimization, Deep Learning, Generalization
+\noindent\textbf{Keywords:} Algorithm Unrolling, LISTA, LASSO, Dimension-Agnostic, Generalization
 \end{abstract}
 
 \tableofcontents
@@ -91,31 +91,26 @@ This project explores \textbf{Algorithm Unrolling} techniques, transforming clas
 
 \subsection{Background}
 
-Iterative optimization algorithms are fundamental tools in machine learning and signal processing. However, traditional algorithms often require numerous iterations to converge, leading to high computational costs. \textbf{Algorithm Unrolling} is a technique that transforms iterative algorithms into deep networks by learning algorithm parameters to accelerate convergence \cite{gregor2010learning, monga2021algorithm}.
+LASSO (Least Absolute Shrinkage and Selection Operator) is a core optimization problem in sparse signal recovery:
+\begin{equation}
+    \min_x \frac{1}{2} \|Ax - b\|^2 + \lambda \|x\|_1
+\end{equation}
 
-\subsection{Research Objectives}
+The classical ISTA (Iterative Shrinkage-Thresholding Algorithm) solves this iteratively:
+\begin{equation}
+    x_{k+1} = \text{SoftThreshold}(x_k - \eta A^T(Ax_k - b), \eta\lambda)
+\end{equation}
 
-This project systematically implements three unrolled architectures:
-\begin{enumerate}
-    \item \textbf{LASSO} — LISTA and its variants
-    \item \textbf{Low-rank Matrix Recovery} — ADMM-Net and its variants
-    \item \textbf{Quadratic Programming} — PGD-Net and its variants
-\end{enumerate}
+\textbf{Problem}: ISTA requires many iterations to converge, leading to high computational costs.
 
-We focus on the following questions:
-\begin{itemize}
-    \item \textbf{Generalization}: Can unrolled networks generalize to unseen problem instances?
-    \item \textbf{Dimension-agnostic}: Can we design a network that handles different input dimensions?
-    \item \textbf{Theoretical analysis}: What about stability and convergence of unrolled networks?
-\end{itemize}
+\textbf{Solution}: Unroll ISTA into a neural network and learn better parameters.
 
 \subsection{Main Contributions}
 
 \begin{enumerate}
-    \item \textbf{LISTA-Momentum}: Propose LISTA with learnable momentum to improve convergence and solve generalization
+    \item \textbf{LISTA-Momentum}: Propose LISTA with learnable momentum to solve generalization
     \item \textbf{Dimension-agnostic LISTA}: Design dimension-agnostic architecture for arbitrary input dimensions
     \item \textbf{Theoretical analysis}: Provide spectral radius stability verification and parameter matrix analysis
-    \item \textbf{Systematic experiments}: Conduct comprehensive comparison and ablation studies
 \end{enumerate}
 
 % ==================== 预备知识 ====================
@@ -124,113 +119,309 @@ We focus on the following questions:
 
 \subsection{Proximal Operator}
 
-The proximal operator is a key tool for solving non-smooth optimization problems \cite{parikh2014proximal}:
+The proximal operator is a key tool for solving non-smooth optimization problems:
 \begin{equation}
     \text{prox}_{\lambda f}(v) = \arg\min_x \left( f(x) + \frac{1}{2\lambda} \|x - v\|^2 \right)
 \end{equation}
 
-\subsection{Projection Operator}
-
-Projection onto a convex set $C$:
+For L1 regularization, the proximal operator is the soft thresholding function:
 \begin{equation}
-    \text{Proj}_C(x) = \arg\min_{y \in C} \|y - x\|^2
+    \text{prox}_{\lambda|\cdot|_1}(v)_i = \text{sign}(v_i) \max(|v_i| - \lambda, 0)
 \end{equation}
 
-\subsection{ADMM Algorithm}
+\subsection{ISTA Algorithm}
 
-The Alternating Direction Method of Multipliers (ADMM) solves \cite{boyd2011distributed}:
+ISTA solves the LASSO problem:
 \begin{equation}
-    \min_{x,z} f(x) + g(z) \quad \text{s.t.} \quad Ax + Bz = c
+    x_{k+1} = \text{SoftThreshold}(x_k - \eta A^T(Ax_k - b), \eta\lambda)
 \end{equation}
+
+\textbf{Convergence rate}: $\|x_k - x^*\| = O(1/k)$
+
+\subsection{FISTA Algorithm}
+
+FISTA accelerates ISTA with Nesterov momentum:
+\begin{align}
+    y_k &= x_k + \frac{k-1}{k+2}(x_k - x_{k-1}) \\
+    x_{k+1} &= \text{SoftThreshold}(y_k - \eta A^T(Ay_k - b), \eta\lambda)
+\end{align}
+
+\textbf{Convergence rate}: $\|x_k - x^*\| = O(1/k^2)$
 
 % ==================== 展开方法 ====================
 \section{Unrolling Methods}
 \label{sec:methods}
 
-\subsection{LASSO — LISTA and Variants}
+\subsection{LISTA (Gregor \& LeCun, 2010)}
 
-\textbf{Optimization problem}:
-\begin{equation}
-    \min_x \frac{1}{2} \|Ax - b\|^2 + \lambda \|x\|_1
-\end{equation}
-
-\textbf{ISTA iteration} \cite{beck2009fast}:
-\begin{equation}
-    x_{k+1} = \text{SoftThreshold}(x_k - \eta A^T(Ax_k - b), \eta\lambda)
-\end{equation}
-
-\subsubsection{LISTA (Gregor \& LeCun, 2010)}
-
-Unroll $T$ ISTA iterations into $T$ layers with learnable parameters $W_1, W_2, \theta$:
+\textbf{Core idea}: Unroll $T$ ISTA iterations into $T$ layers with learnable parameters $W_1, W_2, \theta$:
 \begin{equation}
     x_{k+1} = \sigma(W_1 b + W_2 x_k; \theta_k)
 \end{equation}
 
-\subsubsection{LISTA-CP (Chen et al., 2018)}
+\textbf{Problem}: $W_1, W_2$ are fixed, cannot generalize to new $A$.
+
+\subsection{LISTA-CP (Chen et al., 2018)}
 
 \textbf{Core improvement}: Couple weights using $B$:
 \begin{equation}
     W_1 = \eta B, \quad W_2 = I - \eta BA
 \end{equation}
 
+\textbf{Advantage}: Parameters reduced from $O(nm + n^2)$ to $O(nm)$
+
 \textbf{Problem}: $B$ is tied to training matrix $A_{train}$, cannot generalize to new $A$.
 
-\subsubsection{LISTA-Momentum (Ours)}
+\subsection{LISTA-Momentum (Ours)}
 
-\textbf{Core innovation}: Introduce learnable momentum:
+\textbf{Core innovation}: Introduce learnable momentum to solve generalization.
+
+\subsubsection{Mathematical Formulation}
+
 \begin{equation}
 \boxed{
 \begin{aligned}
-y_k &= x_k + \sigma(\beta) \cdot (x_k - x_{k-1}) & \text{(momentum)} \\
+y_k &= x_k + \sigma(\beta) \cdot (x_k - x_{k-1}) & \text{(momentum extrapolation)} \\
 g_k &= A^T(A y_k - b) & \text{(gradient with current A)} \\
-x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot W g_k; \theta) & \text{(learnable transform)}
+x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot W g_k; \theta) & \text{(learnable transformation)}
 \end{aligned}
 }
 \end{equation}
 
-\textbf{Key design}:
+\subsubsection{Parameter Description}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Parameter} & \textbf{Dimension} & \textbf{Role} & \textbf{Initialization} \\
+\midrule
+$W$ & $n \times n$ & Gradient transformation & Identity matrix $I$ \\
+$\eta$ & scalar & Step size & 0.1 \\
+$\beta$ & scalar & Momentum & 0.0 (sigmoid → 0.5) \\
+$\theta$ & scalar & Threshold & 0.1 \\
+\bottomrule
+\end{tabular}
+\caption{LISTA-Momentum parameters}
+\label{tab:params}
+\end{table}
+
+\subsubsection{Key Design}
+
 \begin{enumerate}
-    \item Don't embed A in weights: compute gradient with current A at each layer
-    \item Learn general gradient transformation rule W: independent of A
-    \item Learnable momentum parameter $\beta$: adaptive acceleration
+    \item \textbf{Don't embed A in weights}: Compute gradient with current A at each layer
+    \item \textbf{Learn general gradient transformation W}: Independent of A
+    \item \textbf{Learnable momentum $\beta$}: Adaptive acceleration
 \end{enumerate}
 
-\subsubsection{Dimension-agnostic LISTA (Ours)}
+\subsubsection{PyTorch Implementation}
 
-\textbf{Core innovation}: Design dimension-agnostic architecture:
+\begin{lstlisting}[language=Python]
+class LISTAMomentumLayer(nn.Module):
+    def __init__(self, m, n):
+        super().__init__()
+        # Learnable gradient transformation W
+        self.W = nn.Linear(n, n, bias=False)
+        nn.init.eye_(self.W.weight)  # Initialize as identity
+
+        # Learnable step size and momentum
+        self.eta = nn.Parameter(torch.tensor(0.1))
+        self.beta = nn.Parameter(torch.tensor(0.0))
+
+        # Learnable threshold
+        self.threshold = nn.Parameter(torch.tensor(0.1))
+
+    def forward(self, b, x, x_prev, A):
+        # Momentum extrapolation
+        beta = torch.sigmoid(self.beta)
+        y = x + beta * (x - x_prev)
+
+        # Gradient with current A
+        Ay = torch.bmm(A, y.unsqueeze(-1)).squeeze(-1)
+        residual = Ay - b
+        grad = torch.bmm(A.transpose(1,2), residual.unsqueeze(-1)).squeeze(-1)
+
+        # Learnable transformation
+        transformed_grad = self.W(grad)
+        z = y - self.eta * transformed_grad
+
+        # Soft thresholding
+        return torch.sign(z) * torch.maximum(
+            torch.abs(z) - self.threshold, torch.zeros_like(z))
+\end{lstlisting}
+
+\subsection{Dimension-Agnostic LISTA (Ours)}
+
+\textbf{Core problem}: LISTA-Momentum uses \texttt{nn.Linear(n, n)} for gradient transformation $W$, which is fixed to dimension $n$. When problem dimension changes, retraining is needed.
+
+\textbf{Core innovation}: Design dimension-agnostic architecture that handles arbitrary input dimensions.
+
+\subsubsection{Design Philosophy}
+
+\textbf{Key insight}: The gradient transformation $W$ should be independent of dimension $n$.
+
+\textbf{Solution}:
 \begin{enumerate}
-    \item LayerNorm normalization: eliminate dimension effects
-    \item Shared MLP transformation: same transform for each element
-    \item Scale factor: restore pre-normalization scale
+    \item \textbf{LayerNorm normalization}: Eliminate dimension effects
+    \item \textbf{Shared MLP transformation}: Same transform for each element
+    \item \textbf{Scale factor}: Restore pre-normalization scale
 \end{enumerate}
 
-\subsection{Low-rank Matrix Recovery — ADMM-Net}
+\subsubsection{Mathematical Formulation}
 
-\textbf{Optimization problem}:
 \begin{equation}
-    \min_X \|X\|_* \quad \text{s.t.} \quad P_\Omega(X) = P_\Omega(M)
+\boxed{
+\begin{aligned}
+y_k &= x_k + \sigma(\beta) \cdot (x_k - x_{k-1}) & \text{(momentum extrapolation)} \\
+g_k &= A^T(A y_k - b) & \text{(gradient with current A)} \\
+\bar{g}_k &= \text{LayerNorm}(g_k) & \text{(normalization)} \\
+\hat{g}_k &= \text{MLP}(\bar{g}_k) & \text{(shared transformation)} \\
+x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot \hat{g}_k \cdot \text{std}(g_k); \theta) & \text{(restore scale)}
+\end{aligned}
+}
 \end{equation}
 
-\textbf{ADMM-Net unrolling} \cite{sun2016deep}:
-\begin{itemize}
-    \item ADMMNet: Basic ADMM unrolling
-    \item ADMMNetV2: With learnable linear transforms
-    \item SoftImputeNet: Soft-Impute unrolling
-\end{itemize}
+\subsubsection{Key Components}
 
-\subsection{Quadratic Programming — PGD-Net}
-
-\textbf{Optimization problem}:
+\textbf{1. LayerNorm Normalization}:
 \begin{equation}
-    \min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C
+    \bar{g} = \frac{g - \mu(g)}{\sigma(g) + \epsilon}
 \end{equation}
+Eliminates the effect of dimension $n$, making transformation dimension-independent.
 
-\textbf{PGD-Net variants}:
-\begin{itemize}
-    \item PGDNet: Basic PGD unrolling
-    \item PGDMomentumNet: With Nesterov momentum
-    \item PGDLearnedQNet: Learning Q matrix correction
-\end{itemize}
+\textbf{2. Shared MLP Transformation}:
+\begin{lstlisting}[language=Python]
+self.transform = nn.Sequential(
+    nn.Linear(1, hidden_dim),
+    nn.GELU(),
+    nn.Linear(hidden_dim, 1),
+)
+\end{lstlisting}
+Applies the same transformation to each element, parameters independent of dimension $n$.
+
+\textbf{3. Scale Factor}:
+\begin{equation}
+    \hat{g} = \text{MLP}(\bar{g}) \cdot \sigma(g)
+\end{equation}
+Restores the pre-normalization scale.
+
+\subsubsection{Complete PyTorch Implementation}
+
+\begin{lstlisting}[language=Python]
+class DimensionAgnosticLayer(nn.Module):
+    """Dimension-agnostic LISTA-Momentum layer.
+
+    Key design:
+    1. LayerNorm to normalize gradient (eliminate dimension effects)
+    2. Shared MLP transformation (dimension-independent)
+    3. Learnable scale factor (restore pre-normalization scale)
+    """
+
+    def __init__(self, hidden_dim=32):
+        super().__init__()
+
+        # Gradient transformation network (dimension-agnostic)
+        self.transform = nn.Sequential(
+            nn.Linear(1, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+        # Learnable step size and momentum
+        self.eta = nn.Parameter(torch.tensor(0.1))
+        self.beta = nn.Parameter(torch.tensor(0.0))
+
+        # Learnable threshold
+        self.threshold = nn.Parameter(torch.tensor(0.1))
+
+        # Learnable scale factor
+        self.scale = nn.Parameter(torch.tensor(1.0))
+
+    def forward(self, b, x, x_prev, A):
+        # Momentum extrapolation
+        beta = torch.sigmoid(self.beta)
+        y = x + beta * (x - x_prev)
+
+        # Gradient with current A: g = A^T (A y - b)
+        Ay = torch.bmm(A, y.unsqueeze(-1)).squeeze(-1)
+        residual = Ay - b
+        grad = torch.bmm(A.transpose(1, 2), residual.unsqueeze(-1)).squeeze(-1)
+
+        # Dimension-agnostic transformation
+        batch_size, n = grad.shape
+
+        # 1. Normalization (eliminate dimension effects)
+        grad_mean = grad.mean(dim=-1, keepdim=True)
+        grad_std = grad.std(dim=-1, keepdim=True) + 1e-6
+        grad_normalized = (grad - grad_mean) / grad_std
+
+        # 2. Element-wise transformation (shared weights)
+        grad_flat = grad_normalized.reshape(-1, 1)  # (batch*n, 1)
+        transformed_flat = self.transform(grad_flat)  # (batch*n, 1)
+        transformed_normalized = transformed_flat.reshape(batch_size, n)  # (batch, n)
+
+        # 3. Restore scale + residual connection
+        transformed_grad = (transformed_normalized + grad_normalized) * grad_std * self.scale
+
+        # Update
+        z = y - self.eta * transformed_grad
+
+        # Soft thresholding
+        return torch.sign(z) * torch.maximum(
+            torch.abs(z) - self.threshold, torch.zeros_like(z))
+
+
+class DimensionAgnosticLISTA(nn.Module):
+    """Dimension-agnostic LISTA-Momentum.
+
+    Can handle different A matrix dimensions without retraining.
+    """
+
+    def __init__(self, T=10, hidden_dim=32):
+        super().__init__()
+        self.T = T
+        self.layers = nn.ModuleList([
+            DimensionAgnosticLayer(hidden_dim) for _ in range(T)
+        ])
+
+    def forward(self, b, A, x0=None):
+        batch_size = b.shape[0]
+        if A.dim() == 2:
+            A = A.unsqueeze(0).expand(batch_size, -1, -1)
+
+        n = A.shape[2]
+        x = x0 if x0 is not None else torch.zeros(batch_size, n, device=b.device)
+        x_prev = x.clone()
+
+        for layer in self.layers:
+            x_new = layer(b, x, x_prev, A)
+            x_prev = x
+            x = x_new
+
+        return x
+\end{lstlisting}
+
+\subsubsection{Parameter Analysis}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Component} & \textbf{Parameters} & \textbf{Description} \\
+\midrule
+MLP & $3 \times \text{hidden\_dim} + 2$ & Independent of dimension $n$ \\
+$\eta, \beta, \theta, \text{scale}$ & 4 & Scalar parameters \\
+Per layer total & $3 \times \text{hidden\_dim} + 6$ & Fixed \\
+T layers total & $T \times (3 \times \text{hidden\_dim} + 6)$ & Fixed \\
+\bottomrule
+\end{tabular}
+\caption{Parameter count analysis}
+\label{tab:param_count}
+\end{table}
+
+\textbf{Key}: Parameter count is independent of dimension $n$, enabling arbitrary input dimensions.
 
 % ==================== 实验设置 ====================
 \section{Experimental Setup}
@@ -238,7 +429,7 @@ x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot W g_k; \theta) & \text{(learnab
 
 \subsection{Data Generation}
 
-\textbf{LASSO}:
+\textbf{LASSO problem}:
 \begin{itemize}
     \item Measurement matrix $A \in \mathbb{R}^{m \times n}$ with normalized columns
     \item Sparse signal $x$ with sparsity $s = 10$
@@ -255,7 +446,7 @@ x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot W g_k; \theta) & \text{(learnab
 \midrule
 Optimizer & Adam \\
 Learning rate & 1e-3 \\
-LR scheduler & ReduceLROnPlateau \\
+LR scheduler & CosineAnnealingLR \\
 Gradient clipping & max\_norm=1.0 \\
 Early stopping & patience=20 \\
 Batch size & 64 \\
@@ -272,10 +463,7 @@ Test samples & 100 \\
 
 \begin{itemize}
     \item \textbf{Relative error}: $\|x_{\text{true}} - x_{\text{pred}}\| / \|x_{\text{true}}\|$
-    \item \textbf{Support recovery rate} (LASSO)
-    \item \textbf{Rank recovery} (low-rank matrix)
-    \item \textbf{Constraint violation} (QP)
-    \item \textbf{Optimality gap}: $(f(x) - f^*) / |f^*|$
+    \item \textbf{Support recovery rate}: $|\text{supp}(x_{\text{true}}) \cap \text{supp}(x_{\text{pred}})| / |\text{supp}(x_{\text{true}})|$
     \item \textbf{Inference time}: Wall-clock time (ms)
     \item \textbf{Spectral radius}: $\rho(W_2) = \max_i |\lambda_i(I - \eta BA)|$
 \end{itemize}
@@ -284,7 +472,7 @@ Test samples & 100 \\
 \section{Experimental Results}
 \label{sec:results}
 
-\subsection{LASSO Experiment}
+\subsection{LISTA-Momentum Generalization}
 
 \subsubsection{Fair Comparison (Same Iterations)}
 
@@ -321,7 +509,9 @@ LISTA-CP & 0.448 & 1.215 & 2.71× & 1.88× (ID) \\
 \label{tab:gen}
 \end{table}
 
-\subsection{Dimension Generalization}
+\textbf{Key finding}: LISTA-Momentum outperforms ISTA on both ID and OOD, with only 1.06× generalization degradation!
+
+\subsection{Dimension-Agnostic LISTA}
 
 \begin{table}[h]
 \centering
@@ -340,6 +530,8 @@ LISTA-CP & 0.448 & 1.215 & 2.71× & 1.88× (ID) \\
 \label{tab:dim}
 \end{table}
 
+\textbf{Breakthrough}: Dimension-agnostic LISTA significantly outperforms ISTA within training dimension range (3.77-8.72×)!
+
 \subsection{Parameter Matrix W Analysis}
 
 \begin{table}[h]
@@ -355,6 +547,26 @@ LISTA-CP & 0.448 & 1.215 & 2.71× & 1.88× (ID) \\
 \end{tabular}
 \caption{Parameter matrix W analysis}
 \label{tab:w_analysis}
+\end{table}
+
+\subsection{Noise Robustness}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ccc}
+\toprule
+\textbf{Noise Level $\sigma$} & \textbf{LISTA-Momentum} & \textbf{vs ISTA} \\
+\midrule
+0.001 & 0.542 & 1.55× \\
+0.005 & 0.543 & 1.55× \\
+0.010 & 0.543 & 1.55× \\
+0.020 & 0.546 & 1.54× \\
+0.050 & 0.562 & 1.50× \\
+0.100 & 0.610 & 1.38× \\
+\bottomrule
+\end{tabular}
+\caption{Noise robustness}
+\label{tab:noise}
 \end{table}
 
 % ==================== 消融实验 ====================
@@ -378,24 +590,21 @@ LISTA-CP & 0.448 & 1.215 & 2.71× & 1.88× (ID) \\
 \label{tab:layers}
 \end{table}
 
-\subsection{Noise Robustness}
+\subsection{Generalization Summary}
 
 \begin{table}[h]
 \centering
-\begin{tabular}{ccc}
+\begin{tabular}{lccc}
 \toprule
-\textbf{Noise Level $\sigma$} & \textbf{LISTA-Momentum} & \textbf{vs ISTA} \\
+\textbf{Dimension} & \textbf{Generalize?} & \textbf{Result} & \textbf{Description} \\
 \midrule
-0.001 & 0.542 & 1.55× \\
-0.005 & 0.543 & 1.55× \\
-0.010 & 0.543 & 1.55× \\
-0.020 & 0.546 & 1.54× \\
-0.050 & 0.562 & 1.50× \\
-0.100 & 0.610 & 1.38× \\
+Different $x$ (same $A$) & \checkmark & LISTA 1.60× better & Standard setting \\
+Different $A$ & \checkmark & LISTA 1.06× degradation & LISTA-Momentum solves \\
+Different $n$ & \checkmark & LISTA 3.77-8.72× better & Dimension-agnostic LISTA \\
 \bottomrule
 \end{tabular}
-\caption{Noise robustness}
-\label{tab:noise}
+\caption{Generalization capability summary}
+\label{tab:gen_summary}
 \end{table}
 
 % ==================== 结论 ====================
@@ -405,10 +614,9 @@ LISTA-CP & 0.448 & 1.215 & 2.71× & 1.88× (ID) \\
 \subsection{Main Contributions}
 
 \begin{enumerate}
-    \item \textbf{LISTA-Momentum}: Propose LISTA with learnable momentum to improve convergence and solve generalization
+    \item \textbf{LISTA-Momentum}: Propose LISTA with learnable momentum to solve generalization
     \item \textbf{Dimension-agnostic LISTA}: Design dimension-agnostic architecture for arbitrary input dimensions
     \item \textbf{Theoretical analysis}: Provide spectral radius stability verification and parameter matrix analysis
-    \item \textbf{Systematic experiments}: Conduct comprehensive comparison and ablation studies
 \end{enumerate}
 
 \subsection{Key Findings}
@@ -422,13 +630,13 @@ LISTA-CP & 0.448 & 1.215 & 2.71× & 1.88× (ID) \\
 \subsection{Future Work}
 
 \begin{enumerate}
-    \item \textbf{Extended verification}: Verify on larger-scale problems
+    \item \textbf{Extend dimension range}: Train on larger dimension range
     \item \textbf{Theoretical analysis}: Study convergence and generalization
-    \item \textbf{Application推广}: Apply general architecture to ADMM-Net and PGD-Net
+    \item \textbf{Application}: Apply dimension-agnostic ideas to other problems
 \end{enumerate}
 
 % ==================== 参考文献 ====================
-\begin{thebibliography}{10}
+\begin{thebibliography}{7}
 
 \bibitem{gregor2010learning}
 Gregor, K., \& LeCun, Y. (2010). Learning fast approximations of sparse coding. In \textit{ICML}.
@@ -439,23 +647,14 @@ Chen, X., Liu, J., Wang, Z., \& Yin, W. (2018). Theoretical linear convergence o
 \bibitem{beck2009fast}
 Beck, A., \& Teboulle, M. (2009). A fast iterative shrinkage-thresholding algorithm for linear inverse problems. \textit{SIAM Journal on Imaging Sciences}, 2(1), 183-202.
 
-\bibitem{boyd2011distributed}
-Boyd, S., Parikh, N., Chu, E., Peleato, B., \& Eckstein, J. (2011). Distributed optimization and statistical learning via the alternating direction method of multipliers. \textit{Foundations and Trends in Machine Learning}, 3(1), 1-122.
-
 \bibitem{parikh2014proximal}
 Parikh, N., \& Boyd, S. (2014). Proximal algorithms. \textit{Foundations and Trends in Optimization}, 1(3), 127-239.
-
-\bibitem{duchi2008efficient}
-Duchi, J., Shalev-Shwartz, S., Singer, Y., \& Chandra, T. (2008). Efficient projections onto the ℓ1-ball for learning in high dimensions. In \textit{ICML}.
 
 \bibitem{monga2021algorithm}
 Monga, V., Li, Y., \& Eldar, Y. C. (2021). Algorithm unrolling: Interpretable, efficient deep learning for signal and image processing. \textit{IEEE Signal Processing Magazine}, 38(2), 18-44.
 
-\bibitem{sun2016deep}
-Sun, J., Li, H., \& Xu, Z. (2016). Deep ADMM-Net for compressive sensing MRI. In \textit{NeurIPS}.
-
 \bibitem{andrychowicz2016learning}
-Andrychowicz, M., Denil, M., Gomez, S., Hoffman, M. W., Pfau, D., Schaul, T., \& de Freitas, N. (2016). Learning to learn by gradient descent by gradient descent. In \textit{NeurIPS}.
+Andrychowicz, M., et al. (2016). Learning to learn by gradient descent by gradient descent. In \textit{NeurIPS}.
 
 \bibitem{borgerding2017amp}
 Borgerding, M., Schniter, P., \& Rangan, S. (2017). AMP-inspired deep networks for sparse linear inverse problems. \textit{IEEE Transactions on Signal Processing}, 65(18), 4293-4308.
