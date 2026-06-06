@@ -1,0 +1,20 @@
+# 深度学习大作业依赖
+# Python >= 3.9
+
+# 深度学习框架
+torch>=2.0.0
+torchvision>=0.15.0
+
+# 数值计算
+numpy>=1.24.0
+scipy>=1.10.0
+
+# 可视化
+matplotlib>=3.7.0
+
+# Jupyter
+jupyter>=1.0.0
+notebook>=6.5.0
+
+# 进度条
+tqdm>=4.65.0

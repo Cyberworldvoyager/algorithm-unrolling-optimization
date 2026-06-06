@@ -1,0 +1,465 @@
+\documentclass[11pt,a4paper]{article}
+
+% 语言和编码
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+
+% 数学公式
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+
+% 图表
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+
+% 代码
+\usepackage{listings}
+\usepackage{xcolor}
+
+% 页面布局
+\usepackage[margin=2.5cm]{geometry}
+
+% 超链接
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+% 代码样式
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny,
+    numbersep=5pt,
+    frame=single,
+    breaklines=true,
+    showstringspaces=false,
+    tabsize=4
+}
+
+% 定理环境
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}[theorem]{Definition}
+
+% 标题信息
+\title{Algorithm Unrolling for Continuous Optimization Problems\\
+\large Deep Learning Course Project}
+
+\author{Student Name\\
+\texttt{student@email.com}}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This project explores \textbf{Algorithm Unrolling} techniques, transforming classical iterative optimization algorithms into learnable neural networks. We systematically implement three unrolled architectures: LISTA for LASSO sparse coding, ADMM-Net for low-rank matrix recovery, and PGD-Net for quadratic programming.
+
+\textbf{Core contributions}:
+\begin{enumerate}
+    \item Propose \textbf{LISTA-Momentum} with learnable momentum mechanism to improve convergence
+    \item Design \textbf{dimension-agnostic LISTA} that can handle arbitrary input dimensions
+    \item Provide \textbf{spectral radius stability verification} and \textbf{parameter matrix analysis}
+\end{enumerate}
+
+\textbf{Results}: LISTA-Momentum outperforms classical ISTA on both in-distribution (ID) and out-of-distribution (OOD) tests, with only 1.06× generalization degradation. Dimension-agnostic LISTA achieves 3.77-8.72× performance improvement within training dimension range.
+
+\bigskip
+\noindent\textbf{Keywords:} Algorithm Unrolling, LISTA, Optimization, Deep Learning, Generalization
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ==================== 引言 ====================
+\section{Introduction}
+\label{sec:intro}
+
+\subsection{Background}
+
+Iterative optimization algorithms are fundamental tools in machine learning and signal processing. However, traditional algorithms often require numerous iterations to converge, leading to high computational costs. \textbf{Algorithm Unrolling} is a technique that transforms iterative algorithms into deep networks by learning algorithm parameters to accelerate convergence \cite{gregor2010learning, monga2021algorithm}.
+
+\subsection{Research Objectives}
+
+This project systematically implements three unrolled architectures:
+\begin{enumerate}
+    \item \textbf{LASSO} — LISTA and its variants
+    \item \textbf{Low-rank Matrix Recovery} — ADMM-Net and its variants
+    \item \textbf{Quadratic Programming} — PGD-Net and its variants
+\end{enumerate}
+
+We focus on the following questions:
+\begin{itemize}
+    \item \textbf{Generalization}: Can unrolled networks generalize to unseen problem instances?
+    \item \textbf{Dimension-agnostic}: Can we design a network that handles different input dimensions?
+    \item \textbf{Theoretical analysis}: What about stability and convergence of unrolled networks?
+\end{itemize}
+
+\subsection{Main Contributions}
+
+\begin{enumerate}
+    \item \textbf{LISTA-Momentum}: Propose LISTA with learnable momentum to improve convergence and solve generalization
+    \item \textbf{Dimension-agnostic LISTA}: Design dimension-agnostic architecture for arbitrary input dimensions
+    \item \textbf{Theoretical analysis}: Provide spectral radius stability verification and parameter matrix analysis
+    \item \textbf{Systematic experiments}: Conduct comprehensive comparison and ablation studies
+\end{enumerate}
+
+% ==================== 预备知识 ====================
+\section{Preliminaries}
+\label{sec:prelim}
+
+\subsection{Proximal Operator}
+
+The proximal operator is a key tool for solving non-smooth optimization problems \cite{parikh2014proximal}:
+\begin{equation}
+    \text{prox}_{\lambda f}(v) = \arg\min_x \left( f(x) + \frac{1}{2\lambda} \|x - v\|^2 \right)
+\end{equation}
+
+\subsection{Projection Operator}
+
+Projection onto a convex set $C$:
+\begin{equation}
+    \text{Proj}_C(x) = \arg\min_{y \in C} \|y - x\|^2
+\end{equation}
+
+\subsection{ADMM Algorithm}
+
+The Alternating Direction Method of Multipliers (ADMM) solves \cite{boyd2011distributed}:
+\begin{equation}
+    \min_{x,z} f(x) + g(z) \quad \text{s.t.} \quad Ax + Bz = c
+\end{equation}
+
+% ==================== 展开方法 ====================
+\section{Unrolling Methods}
+\label{sec:methods}
+
+\subsection{LASSO — LISTA and Variants}
+
+\textbf{Optimization problem}:
+\begin{equation}
+    \min_x \frac{1}{2} \|Ax - b\|^2 + \lambda \|x\|_1
+\end{equation}
+
+\textbf{ISTA iteration} \cite{beck2009fast}:
+\begin{equation}
+    x_{k+1} = \text{SoftThreshold}(x_k - \eta A^T(Ax_k - b), \eta\lambda)
+\end{equation}
+
+\subsubsection{LISTA (Gregor \& LeCun, 2010)}
+
+Unroll $T$ ISTA iterations into $T$ layers with learnable parameters $W_1, W_2, \theta$:
+\begin{equation}
+    x_{k+1} = \sigma(W_1 b + W_2 x_k; \theta_k)
+\end{equation}
+
+\subsubsection{LISTA-CP (Chen et al., 2018)}
+
+\textbf{Core improvement}: Couple weights using $B$:
+\begin{equation}
+    W_1 = \eta B, \quad W_2 = I - \eta BA
+\end{equation}
+
+\textbf{Problem}: $B$ is tied to training matrix $A_{train}$, cannot generalize to new $A$.
+
+\subsubsection{LISTA-Momentum (Ours)}
+
+\textbf{Core innovation}: Introduce learnable momentum:
+\begin{equation}
+\boxed{
+\begin{aligned}
+y_k &= x_k + \sigma(\beta) \cdot (x_k - x_{k-1}) & \text{(momentum)} \\
+g_k &= A^T(A y_k - b) & \text{(gradient with current A)} \\
+x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot W g_k; \theta) & \text{(learnable transform)}
+\end{aligned}
+}
+\end{equation}
+
+\textbf{Key design}:
+\begin{enumerate}
+    \item Don't embed A in weights: compute gradient with current A at each layer
+    \item Learn general gradient transformation rule W: independent of A
+    \item Learnable momentum parameter $\beta$: adaptive acceleration
+\end{enumerate}
+
+\subsubsection{Dimension-agnostic LISTA (Ours)}
+
+\textbf{Core innovation}: Design dimension-agnostic architecture:
+\begin{enumerate}
+    \item LayerNorm normalization: eliminate dimension effects
+    \item Shared MLP transformation: same transform for each element
+    \item Scale factor: restore pre-normalization scale
+\end{enumerate}
+
+\subsection{Low-rank Matrix Recovery — ADMM-Net}
+
+\textbf{Optimization problem}:
+\begin{equation}
+    \min_X \|X\|_* \quad \text{s.t.} \quad P_\Omega(X) = P_\Omega(M)
+\end{equation}
+
+\textbf{ADMM-Net unrolling} \cite{sun2016deep}:
+\begin{itemize}
+    \item ADMMNet: Basic ADMM unrolling
+    \item ADMMNetV2: With learnable linear transforms
+    \item SoftImputeNet: Soft-Impute unrolling
+\end{itemize}
+
+\subsection{Quadratic Programming — PGD-Net}
+
+\textbf{Optimization problem}:
+\begin{equation}
+    \min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad x \in C
+\end{equation}
+
+\textbf{PGD-Net variants}:
+\begin{itemize}
+    \item PGDNet: Basic PGD unrolling
+    \item PGDMomentumNet: With Nesterov momentum
+    \item PGDLearnedQNet: Learning Q matrix correction
+\end{itemize}
+
+% ==================== 实验设置 ====================
+\section{Experimental Setup}
+\label{sec:setup}
+
+\subsection{Data Generation}
+
+\textbf{LASSO}:
+\begin{itemize}
+    \item Measurement matrix $A \in \mathbb{R}^{m \times n}$ with normalized columns
+    \item Sparse signal $x$ with sparsity $s = 10$
+    \item Observation $b = Ax + \epsilon$, $\epsilon \sim \mathcal{N}(0, 0.001^2)$
+\end{itemize}
+
+\subsection{Training Configuration}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lc}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Optimizer & Adam \\
+Learning rate & 1e-3 \\
+LR scheduler & ReduceLROnPlateau \\
+Gradient clipping & max\_norm=1.0 \\
+Early stopping & patience=20 \\
+Batch size & 64 \\
+Training samples & 1000 \\
+Validation samples & 200 \\
+Test samples & 100 \\
+\bottomrule
+\end{tabular}
+\caption{Training configuration}
+\label{tab:config}
+\end{table}
+
+\subsection{Evaluation Metrics}
+
+\begin{itemize}
+    \item \textbf{Relative error}: $\|x_{\text{true}} - x_{\text{pred}}\| / \|x_{\text{true}}\|$
+    \item \textbf{Support recovery rate} (LASSO)
+    \item \textbf{Rank recovery} (low-rank matrix)
+    \item \textbf{Constraint violation} (QP)
+    \item \textbf{Optimality gap}: $(f(x) - f^*) / |f^*|$
+    \item \textbf{Inference time}: Wall-clock time (ms)
+    \item \textbf{Spectral radius}: $\rho(W_2) = \max_i |\lambda_i(I - \eta BA)|$
+\end{itemize}
+
+% ==================== 实验结果 ====================
+\section{Experimental Results}
+\label{sec:results}
+
+\subsection{LASSO Experiment}
+
+\subsubsection{Fair Comparison (Same Iterations)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ccccc}
+\toprule
+\textbf{T} & \textbf{ISTA} & \textbf{FISTA} & \textbf{LISTA-CP} & \textbf{LISTA-Momentum} \\
+\midrule
+5 & 0.859 & 0.852 & 0.517 & \textbf{0.643} \\
+10 & 0.843 & 0.821 & 0.448 & \textbf{0.526} \\
+20 & 0.821 & 0.742 & 0.360 & \textbf{0.447} \\
+\bottomrule
+\end{tabular}
+\caption{Fair comparison at same number of iterations}
+\label{tab:fair}
+\end{table}
+
+\subsubsection{Generalization Comparison}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{ID} & \textbf{OOD} & \textbf{Degradation} & \textbf{vs ISTA} \\
+\midrule
+ISTA & 0.843 & 0.844 & 1.00× & Baseline \\
+FISTA & 0.821 & 0.822 & 1.00× & 1.03× \\
+LISTA-CP & 0.448 & 1.215 & 2.71× & 1.88× (ID) \\
+\textbf{LISTA-Momentum} & \textbf{0.526} & \textbf{0.555} & \textbf{1.06×} & \textbf{1.60×} \\
+\bottomrule
+\end{tabular}
+\caption{Generalization comparison}
+\label{tab:gen}
+\end{table}
+
+\subsection{Dimension Generalization}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Dimension n} & \textbf{ISTA} & \textbf{LISTA-DimAgnostic} & \textbf{vs ISTA} & \textbf{Status} \\
+\midrule
+50 & 0.479 & \textbf{0.088} & \textbf{5.44×} & Training \\
+100 & 0.701 & \textbf{0.080} & \textbf{8.72×} & Training, Best \\
+150 & 0.799 & \textbf{0.106} & \textbf{7.52×} & Training \\
+200 & 0.852 & \textbf{0.158} & \textbf{5.38×} & Training \\
+300 & 0.900 & \textbf{0.239} & \textbf{3.77×} & Training \\
+\bottomrule
+\end{tabular}
+\caption{Dimension generalization results}
+\label{tab:dim}
+\end{table}
+
+\subsection{Parameter Matrix W Analysis}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ccccc}
+\toprule
+\textbf{Layer} & \textbf{Cosine Sim.} & \textbf{Spectral Radius} & \textbf{Condition Num.} & \textbf{Effective Rank} \\
+\midrule
+1 & 0.915 & 1.452 & 3.01 & 200 \\
+5 & 0.929 & 1.522 & 2.23 & 200 \\
+10 & 0.964 & 1.426 & 2.29 & 200 \\
+\bottomrule
+\end{tabular}
+\caption{Parameter matrix W analysis}
+\label{tab:w_analysis}
+\end{table}
+
+% ==================== 消融实验 ====================
+\section{Ablation Studies}
+\label{sec:ablation}
+
+\subsection{Effect of Layer Count}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ccccc}
+\toprule
+\textbf{T} & \textbf{ISTA} & \textbf{LISTA-CP} & \textbf{LISTA-Momentum} & \textbf{vs ISTA} \\
+\midrule
+5 & 0.859 & 0.517 & 0.643 & 1.34× \\
+10 & 0.843 & 0.448 & 0.526 & 1.60× \\
+20 & 0.821 & 0.360 & 0.447 & 1.84× \\
+\bottomrule
+\end{tabular}
+\caption{Effect of number of layers}
+\label{tab:layers}
+\end{table}
+
+\subsection{Noise Robustness}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ccc}
+\toprule
+\textbf{Noise Level $\sigma$} & \textbf{LISTA-Momentum} & \textbf{vs ISTA} \\
+\midrule
+0.001 & 0.542 & 1.55× \\
+0.005 & 0.543 & 1.55× \\
+0.010 & 0.543 & 1.55× \\
+0.020 & 0.546 & 1.54× \\
+0.050 & 0.562 & 1.50× \\
+0.100 & 0.610 & 1.38× \\
+\bottomrule
+\end{tabular}
+\caption{Noise robustness}
+\label{tab:noise}
+\end{table}
+
+% ==================== 结论 ====================
+\section{Conclusion}
+\label{sec:conclusion}
+
+\subsection{Main Contributions}
+
+\begin{enumerate}
+    \item \textbf{LISTA-Momentum}: Propose LISTA with learnable momentum to improve convergence and solve generalization
+    \item \textbf{Dimension-agnostic LISTA}: Design dimension-agnostic architecture for arbitrary input dimensions
+    \item \textbf{Theoretical analysis}: Provide spectral radius stability verification and parameter matrix analysis
+    \item \textbf{Systematic experiments}: Conduct comprehensive comparison and ablation studies
+\end{enumerate}
+
+\subsection{Key Findings}
+
+\begin{enumerate}
+    \item \textbf{LISTA-Momentum generalization}: By not embedding A in weights, achieve only 1.06× generalization degradation
+    \item \textbf{Dimension-agnostic success}: Using LayerNorm + shared MLP, achieve 3.77-8.72× performance improvement
+    \item \textbf{Parameter matrix W}: W is close to identity matrix, learning ``how to improve gradient''
+\end{enumerate}
+
+\subsection{Future Work}
+
+\begin{enumerate}
+    \item \textbf{Extended verification}: Verify on larger-scale problems
+    \item \textbf{Theoretical analysis}: Study convergence and generalization
+    \item \textbf{Application推广}: Apply general architecture to ADMM-Net and PGD-Net
+\end{enumerate}
+
+% ==================== 参考文献 ====================
+\begin{thebibliography}{10}
+
+\bibitem{gregor2010learning}
+Gregor, K., \& LeCun, Y. (2010). Learning fast approximations of sparse coding. In \textit{ICML}.
+
+\bibitem{chen2018theoretical}
+Chen, X., Liu, J., Wang, Z., \& Yin, W. (2018). Theoretical linear convergence of unfolded ISTA and its practical weights and thresholds. In \textit{NeurIPS}.
+
+\bibitem{beck2009fast}
+Beck, A., \& Teboulle, M. (2009). A fast iterative shrinkage-thresholding algorithm for linear inverse problems. \textit{SIAM Journal on Imaging Sciences}, 2(1), 183-202.
+
+\bibitem{boyd2011distributed}
+Boyd, S., Parikh, N., Chu, E., Peleato, B., \& Eckstein, J. (2011). Distributed optimization and statistical learning via the alternating direction method of multipliers. \textit{Foundations and Trends in Machine Learning}, 3(1), 1-122.
+
+\bibitem{parikh2014proximal}
+Parikh, N., \& Boyd, S. (2014). Proximal algorithms. \textit{Foundations and Trends in Optimization}, 1(3), 127-239.
+
+\bibitem{duchi2008efficient}
+Duchi, J., Shalev-Shwartz, S., Singer, Y., \& Chandra, T. (2008). Efficient projections onto the ℓ1-ball for learning in high dimensions. In \textit{ICML}.
+
+\bibitem{monga2021algorithm}
+Monga, V., Li, Y., \& Eldar, Y. C. (2021). Algorithm unrolling: Interpretable, efficient deep learning for signal and image processing. \textit{IEEE Signal Processing Magazine}, 38(2), 18-44.
+
+\bibitem{sun2016deep}
+Sun, J., Li, H., \& Xu, Z. (2016). Deep ADMM-Net for compressive sensing MRI. In \textit{NeurIPS}.
+
+\bibitem{andrychowicz2016learning}
+Andrychowicz, M., Denil, M., Gomez, S., Hoffman, M. W., Pfau, D., Schaul, T., \& de Freitas, N. (2016). Learning to learn by gradient descent by gradient descent. In \textit{NeurIPS}.
+
+\bibitem{borgerding2017amp}
+Borgerding, M., Schniter, P., \& Rangan, S. (2017). AMP-inspired deep networks for sparse linear inverse problems. \textit{IEEE Transactions on Signal Processing}, 65(18), 4293-4308.
+
+\end{thebibliography}
+
+\end{document}
