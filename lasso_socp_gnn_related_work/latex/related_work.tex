@@ -1,0 +1,109 @@
+\documentclass[10pt,twocolumn]{article}
+
+\usepackage[margin=0.75in]{geometry}
+\usepackage{times}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,citecolor=blue,linkcolor=blue,urlcolor=blue]{hyperref}
+
+\title{Related Work for Cone-Aware Primal-Dual Graph Unrolling}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note summarizes related work on sparse optimization, graph neural networks for mathematical programming, and algorithm-unrolled learning-to-optimize methods.
+The literature contains mature unrolled solvers for LASSO-type sparse recovery, WL-based GNN expressivity results for LP/QP/QCQP/SOCP, and PDHG-unrolled architectures for LPs and QPs.
+The remaining gap is a cone-aware, dimension-agnostic primal-dual graph architecture that unrolls SOCP first-order iterations while retaining explicit second-order cone projections.
+\end{abstract}
+
+\section{Related Work}
+
+\paragraph{GNN expressivity for learning to optimize.}
+Graph neural networks have become a common inductive bias for mathematical programs whose variables and constraints admit permutation-equivariant representations.
+The WL-based line of work represents an optimization instance as a graph and relates the expressive power of message passing to Weisfeiler--Lehman graph tests.
+For LPs, \citet{chen2022lpgnn} represent variables, constraints, and coefficients by a weighted bipartite graph and establish approximation results for LP feasibility, boundedness, optimal values, and optimal solutions.
+This framework has been extended to quadratic and mixed-integer quadratic programs \citep{chen2024qpgnn}, as well as convex quadratically constrained quadratic programs \citep{wu2024qcqpgnn}.
+More general provable GNN solvers for convex optimization have also been studied \citep{qian2025provableconvexgnn}.
+Recent SOCP-GNN results extend WL-based expressivity to second-order cone constraints by augmenting the graph representation to encode conic blocks and prove universality and sample-complexity guarantees \citep{li2025socpgnnworkshop,li2026socpgnn}.
+These results show that SOCPs can be represented by suitably designed GNNs, but they do not by themselves specify an algorithmic trajectory, a residual-driven primal-dual loss, or an explicit solver warm-start procedure.
+Complementary negative results for SDPs further indicate that graph architectures must match the algebraic structure of the underlying cone; standard message passing may fail when the cone geometry introduces higher-order symmetries \citep{qian2026sdpgnn}.
+
+\paragraph{Algorithm-unrolled learning to optimize.}
+Algorithm unrolling maps iterations of an optimization algorithm to neural network layers, preserving useful solver structure while replacing hand-designed parameters by trainable ones \citep{monga2021algorithm}.
+The primal-dual hybrid gradient method \citep{chambolle2011primaldual} is especially relevant because it solves saddle-point formulations of the form
+\begin{equation}
+\begin{aligned}
+    \min_x \; & f(x)+g(Kx) \\
+    \Longleftrightarrow\quad
+    \min_x\max_y \; & f(x)+\langle Kx,y\rangle-g^*(y),
+\end{aligned}
+    \label{eq:pdhg_saddle}
+\end{equation}
+PDHG-Net unrolls this structure for large-scale LPs and uses channel expansion to avoid dense trainable matrices tied to a fixed problem size \citep{li2024pdhgnet}.
+PDQP-Net adopts a related primal-dual unrolling strategy for convex QPs and trains with KKT-informed unsupervised losses \citep{yang2024pdqpnet}.
+Other constrained unrolling approaches use coupled primal and dual GNNs to emulate dual-ascent dynamics for general constrained problems \citep{hadou2025unrolledgnn}, while doubly stochastic PDHG studies blockwise primal-dual updates and sampling mechanisms in classical first-order optimization \citep{xiao2026dspdhg}.
+This AU-based paradigm provides algorithmic interpretability and size generalization, but extending it from LP/QP updates to conic programs requires representing nonlinear cone projections and cone-block interactions inside the learned architecture.
+
+\paragraph{Sparse optimization and graph unrolling.}
+Sparse recovery provides a canonical example of successful unrolling.
+The LASSO \citep{tibshirani1996lasso} solves
+\begin{equation}
+    \min_{x\in\mathbb{R}^n}
+    \frac{1}{2}\|Ax-b\|_2^2 + \lambda\|x\|_1 ,
+    \label{eq:lasso}
+\end{equation}
+and proximal-gradient methods such as ISTA and FISTA exploit the soft-thresholding proximal operator of the $\ell_1$ norm \citep{beck2009fista}.
+LISTA unrolls ISTA into a trainable architecture for sparse coding \citep{gregor2010lista}, and subsequent work established convergence guarantees and efficient hyperparameterized variants \citep{chen2018linearlista,chen2021hyperlista}.
+Graph unrolling networks extend the same idea to graph signal denoising and include a graph sparse-coding architecture, whose objective can be written as a LASSO-type problem with a graph-filter dictionary \citep{chen2021graphunrolling}.
+Thus, sparse optimization already has mature neural and graph-unrolled variants.
+The unresolved LASSO setting considered here is not sparse coding on a fixed graph dictionary, but graph-parametric optimization over arbitrary sensing matrices, where the matrix $A$ itself defines a variable-measurement bipartite graph and the learned update rule must generalize across dimensions.
+
+\paragraph{Conic optimization and SOCP first-order methods.}
+SOCPs extend LPs and convex QPs by introducing constraints of the form
+\begin{equation}
+\begin{aligned}
+    \min_x \quad & c^\top x \\
+    \text{s.t.}\quad & Fx \leq g,\quad l\leq x\leq r,\\
+    & \|A_i x+b_i\|_2 \leq d_i^\top x+e_i,\quad i=1,\ldots,q .
+\end{aligned}
+\label{eq:socp}
+\end{equation}
+where $\|A_i x+b_i\|_2 \leq d_i^\top x+e_i$ is equivalent to membership in the second-order cone $\mathcal{K}_{\mathrm{soc}}=\{(t,z):\|z\|_2\leq t\}$ \citep{lobo1998socp}.
+Classical primal-dual and splitting methods handle such constraints through projections onto products of cones.
+Recent large-scale conic solvers build on restarted PDHG, adaptive step-size rules, GPU-accelerated sparse matrix-vector products, and efficient projections onto zero, nonnegative, second-order, rotated second-order, exponential, and semidefinite cones \citep{lin2026pdcs}.
+These solvers establish that PDHG is a practical algorithmic backbone for conic programs.
+However, they remain hand-designed first-order methods rather than learned, dimension-agnostic graph architectures.
+
+\paragraph{Scope of the present work.}
+The closest learning-based SOCP work is WL-based: it proves that specialized GNNs can represent SOCP feasibility and solutions \citep{li2026socpgnn}.
+The closest unrolled learning-to-optimize works are AU-based: they unroll PDHG/PDQP for LPs and QPs using channel expansion and primal-dual residual losses \citep{li2024pdhgnet,yang2024pdqpnet}.
+The closest classical solver work applies PDHG directly to conic programs with explicit cone projections \citep{lin2026pdcs}.
+To our knowledge, existing work has not combined these three ingredients into a cone-aware, PDHG-unrolled GNN for SOCPs that retains explicit second-order cone projections while learning step sizes, extrapolation, block-sampling probabilities, or channel-mixing maps.
+
+\begin{table*}[t]
+\centering
+\caption{Taxonomy of closely related learning-to-optimize paradigms.}
+\label{tab:novelty}
+\small
+\begin{tabular}{@{}p{0.18\textwidth}p{0.36\textwidth}p{0.40\textwidth}@{}}
+\toprule
+Paradigm & Representative coverage & Structure not covered \\
+\midrule
+Sparse unrolling & LISTA, HyperLISTA, graph sparse-coding unrolling & Arbitrary matrix-defined LASSO graphs with size transfer \\
+WL-based GNNs & LP, QP, QCQP, and SOCP expressivity & Algorithmic primal-dual trajectories and solver warm starts \\
+AU-based L2O & PDHG-Net for LPs and PDQP-Net for QPs & Explicit SOC projection and cone-block message passing \\
+Conic first-order solvers & PDHG-based matrix-free conic solvers & Learned graph/channel parameterization across instances \\
+General constrained GNNs & Dual-ascent unrolled GNNs & SOCP-specific PDHG updates and cone geometry \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\bibliographystyle{plainnat}
+\bibliography{../bib/references}
+
+\end{document}

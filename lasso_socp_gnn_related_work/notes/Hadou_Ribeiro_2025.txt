@@ -1,0 +1,446 @@
+                                                UNROLLED GRAPH NEURAL NETWORKS FOR CONSTRAINED OPTIMIZATION
+
+                                                                                        Samar Hadou                 Alejandro Ribeiro
+
+                                                    Department of Electrical and Systems Engineering, University of Pennsylvania, PA, USA
+
+
+                                                                       ABSTRACT                                     expressivity and permutation equivariance. GNNs are well suited to
+                                         In this paper, we unroll the dynamics of the dual ascent (DA) algo-        constrained problems, as variable-constraint relations can be naturally
+                                         rithm in two coupled graph neural networks (GNNs) to solve con-            encoded in a graph adjacency matrix [19–21]. However, this design
+                                         strained optimization problems. The two networks interact with each        choice can further exacerbate the lack of monotonic descent often
+arXiv:2509.17156v2 [cs.LG] 30 Jan 2026
+
+
+
+
+                                         other at the layer level to find a saddle point of the Lagrangian. The     observed in unrolled networks. As reported in [7], the lack of descent
+                                         primal GNN finds a stationary point for a given dual multiplier, while     behavior makes the networks prone to perturbations and distribution
+                                         the dual network iteratively refines its estimates to reach an optimal     shifts. To address this limitation, we impose monotonic descent and
+                                         solution. We force the primal and dual networks to mirror the dynam-       ascent constraints on the outputs of the primal and dual layers, re-
+                                         ics of the DA algorithm by imposing descent and ascent constraints.        spectively, during training. These constraints encourage the models
+                                         We propose a joint training scheme that alternates between updating        to learn the underlying DA dynamics rather than merely fitting the
+                                         the primal and dual networks. Our numerical experiments demon-             final solution, which improves the final-layer performance and en-
+                                         strate that our approach yields near-optimal near-feasible solutions       hances out-of-distribution (OOD) generalization, as demonstrated in
+                                         and generalizes well to out-of-distribution (OOD) problems.                our numerical experiments.
+                                                                                                                         In summary, the main contributions of this work are as follows.
+                                             Index Terms— Unrolling, constrained optimization, GNNs, dual
+                                         ascent, constrained learning                                                     • We design a pair of GNNs that interact at the layer level to
+                                                                                                                            solve the dual problem (Section 3).
+                                                                1. INTRODUCTION                                           • We formulate the training problem as a nested optimization
+                                                                                                                            problem and impose descent and ascent constraints on the
+                                         Algorithm unrolling has emerged as a learning-to-optimize paradigm                 unrolled layers (Section 4).
+                                         that embeds iterative solvers into neural network architectures, yield-          • We empirically assess our approach on mixed-integer quadratic
+                                         ing learnable optimizers endowed with domain-specific knowledge                    programs (MIQPs) with linear constraints (Section 5)
+                                         [1, 2]. Despite the extensive literature on unrolling, most work fo-
+                                         cuses on unconstrained optimization problems, e.g., [2–11]. For                         2. CONSTRAINED OPTIMIZATION
+                                         constrained settings, a common approach is to incorporate constraints
+                                         into the training loss as penalty terms [12–14]. Another line of work      Consider a constrained problem that poses the task of minimizing a
+                                         considers unrolling primal-dual algorithms [15–18], but these efforts      scalar objective function f0 : Rn → R subject to m constraints,
+                                         typically restrict learning to a few scalar hyperparameters, such as
+                                                                                                                              P ∗ (z) = minn      f0 (x; z)   s.t.   f (x; z) ≤ 0,      (1)
+                                         the step size, rather than learning the full algorithmic dynamics. As a                           x∈R
+                                         result, such approaches remain narrowly tailored to the designated                      n        m
+                                                                                                                    where f : R → R is a vector-valued function representing the
+                                         problem classes.                                                           problem constraints, and z represents a problem instance. Moving
+                                              In this paper, we unroll the dynamics of dual ascent (DA) into two    to the dual domain, the Lagrangian function, L : Rn × Rm  + → R,
+                                         coupled graph neural networks (GNNs). The models aim to collabo-           associated with (1) is
+                                         ratively find the saddle point of the Lagrangian function associated
+                                         with a constrained problem. The primal GNN predicts a layerwise                             L(x, λ; z) = f0 (x; z) + λ⊤ f (x; z),              (2)
+                                         trajectory towards a stationary point of the Lagrangian for a given        where λ contains the dual multipliers. The dual problem is defined as
+                                         multiplier, while the dual GNN uses the primal predictions to ascend
+                                                                                                                                      D∗ (z) = maxm min L(x, λ; z),                     (3)
+                                         the dual function toward its optimum. We cast the training problem                                      λ∈R+    x
+                                         as a nested optimization problem, where the inner level trains the
+                                         primal network over a joint distribution of constrained problems and       and the duality theory affirms that D∗ (z) ≤ P ∗ (z) [22]. The equality
+                                         Lagrangian multipliers, while the outer level trains the dual network.     holds under strong duality, which applies to convex problems. Under
+                                         Crucially, the multiplier distribution required by the primal network      this assumption, the Lagrangian has a saddle point (x∗ , λ∗ ), with
+                                         training is not known a priori, as it is induced by the multiplier tra-    x∗ and λ∗ optimal for (1) and (3), respectively. The DA algorithm
+                                         jectories generated by the forward pass of the dual network. Our           retrieves the dual optimum λ∗ through the iterations:
+                                                                                                                                      x∗l (λl ) ∈ argmin L x, λl ; z ,
+                                                                                                                                                                     
+                                         nested formulation allows for alternating training steps to overcome
+                                         this challenge. The dual network first generates multiplier trajectories                                     x
+                                                                                                                                                   h               i
+                                         to train the primal network, whose solutions are then used in the dual                          λl+1 = λl + η f x∗l , z         ,              (4)
+                                         network updates. This procedure optimizes each network against the                                                             +
+
+                                         most recent outputs of the other until convergence.                         where η is a step size, and [·]+ denotes a projection onto Rm
+                                                                                                                                                                                 + . In (4),
+                                              Departing from traditional unrolling literature, which wires a        a Lagrangian stationary point is attained for the recent multiplier λl ,
+                                         specific iterative algorithm into the architecture, we instead use stan-   before a (projected) gradient ascent step is taken in the dual domain.
+                                         dard GNNs to model the primal and dual iterates to leverage their          The primal optimum x∗ is then recovered from x∗ ∈ x∗ (λ∗ ).
+     3. UNROLLED NETWORKS FOR CONSTRAINED                                                  ΦP (λl , z; θP )
+                 OPTIMIZATIONS
+                                                                                               x
+                                                                                               e0                                                    λ0
+We design a pair of unrolled GNNs that jointly find the saddle point of                                                λl    x0
+                                                                                      Φ1P    e0 , λl , z ; θP1                      Φ1D    λ0 , x0 , z ; θD1
+                                                                                                                                                              
+                                                                                             x
+(3), mimicking the DA dynamics, as illustrated in Fig. 1. The primal
+network, ΦP , emulates the minimization problem with respect to x,                             x
+                                                                                               e1                                                    λ1
+while the dual network, ΦD , emulates the gradient ascent steps in the                                                 λl    x1
+                                                                                      Φ2P    e1 , λl , z ; θP2                      Φ2D    λ1 , x1 , z ; θD2
+                                                                                                                                                              
+dual domain across its layers. Each unrolled layer consists of T graph                       x
+sub-layers, each comprising a graph filter and a nonlinearity [23],
+                                                                                               x
+                                                                                               e2
+followed by a readout that outputs a primal or dual estimate.
+     The primal network, denoted by ΦP ( ·, · ; θP ), predicts a K-step                             ..                                          ..
+                                 e0 towards x
+trajectory from an initial point x            eK ≈ x∗ (λ) across its K
+                                                                                                     .                                           .
+unrolled layers. For a given dual multiplier λ and a problem instance                                                                                λL−1
+z, the k-th primal layer refines the estimate x ek−1 into                                                             λl   xL−1
+                                                                                    ΦK      eK−1 , λl , z ; θPK                    ΦL   λL−1 , xL−1 , z ; θDL
+                                                                                                                                                                   
+                                                                                     P      x                                       D
+                                                  
+                    ek = ΦkP x
+                    x              ek−1 , λ, z; θPk ,               (5)                       x
+                                                                                              eK
+
+where θPk contains the parameters of the graph sub-layers and readout.                                                             xL                λL
+We use the tilde notation to distinguish the intermediate estimates
+produced by the primal layers from other occurrences of x. As a
+general design principle, we incorporate residual connections between        Fig. 1: The structure of the unrolled primal GNN (left) and dual GNN
+unrolled layers as they naturally mimic gradient-based updates.              (right). The forward pass alternates between: i) each dual layer ΦlD
+     The dual network, denoted by ΦD ( · ; θD , θP ), has L layers whose     outputs λl , which is sent to the primal network ΦP to query for the
+outputs constitute a trajectory in the dual domain starting from an          Lagrangian minimizer x∗ (λl ), and ii) the primal network performs
+initial point λ0 and ending at an estimate of the optimal multiplier,        its internal forward pass and returns xl ≈ x∗ (λl ).
+λL ≈ λ∗ . The l-th dual layer is defined as
+                                                          
+            λl = ΦlD λl−1 , ΦP (λl−1 , z; θP ), z; θDl ,             (6)     does not guarantee that the intermediate layer trajectories are mono-
+                                                                             tonically descending (primal) or ascending (dual).
+where θDl is the learnable parameters. In (6), the l-th dual layer queries       To address this challenge, we impose descent constraints on the
+the primal network for its estimate ΦP (λl−1 , z; θP ) ≈ x∗ (λl−1 ),         primal network such that the gradient norm of the Lagrangian with
+denoted as xl−1 . Consequently, a single forward pass of the dual            respect to x is forced to decrease, on average, across the layers. The
+network triggers L forward passes of the primal network, as illustrated      primal network training is then cast as
+in Fig. 1. The nonlinearity at the end of each dual layer is chosen as a                     h                       i
+relu function to ensure that the predicted multipliers are nonnegative.      θP∗ ∈ argmin E L ΦP (λ, z; θP ), λ; z ,
+                                                                                      θP
+     Finally, the solution to (1) is obtained by feeding the final dual                     h                                      i
+estimate, λL = ΦD (z; θD , θP∗ ), to the primal network,
+                                                                                                            
+                                                                                                   ek , λ; z ∥−αk ∥∇x L x
+                                                                                      s.t. E ∥∇x L x                    ek−1 , λ; z ∥ ≤ 0, ∀k
+                                                                                                                                                                (10)
+                  xL = ΦP ΦD z; θD , θP , z; θP .                      (7)
+                                                                             where αk is a design parameter that controls the descent rate and x   e0
+     Our goal is to train the primal and dual networks such that the         is initialized randomly. Analogously, we impose ascent constraints on
+output of the primal network satisfies xeK ≈ x∗ (λ) for any λ, and           the dual network to ensure that the gradient norm of the Lagrangian
+the output of the dual network satisfies λL ≈ λ∗ for a family of             with respect to λ, i.e., ∥f (·; z)∥, decreases across the layers. This is
+optimization problems. In addition, the predicted trajectories should        a proxy for decreasing the gradient of the dual function (Danskin’s
+follow descent and ascent dynamics with respect to the corresponding         theorem [24]). The dual network training is then defined as
+optimization variable.
+                                                                                                  h                            i
+                                                                                θD∗ ∈ argmax E L ΦP (λL , z; θP∗ ), λL ; z ,
+       4. TRAINING WITH DESCENT CONSTRAINTS                                                  θD
+                                                                                                          h                             i
+                                                                                             s.t.        E f (xl ; z) − βl f (xl−1 ; z)   ≤ 0, ∀l, (11)
+We formulate the unsupervised training problem as a nested opti-
+mization problem that mirrors the dual problem. The outer problem
+is the dual network training problem over a distribution of problem          where βl is a design parameter and λ0 is randomly initialized. Prob-
+instances, while the inner problem trains the primal network over a          lems (10) and (11) are constrained nonconvex programs with small
+joint distribution of problem instances and multipliers. Formally, the       duality gap [25]. Therefore, they can be tackled in the dual domain
+nested training problem is defined as                                        with meta dual variables, µ and ν, via Algorithms 1 and 2, respec-
+                        h                                                    tively, in which the hat notation denotes the empirical averages.
+                                                 i                               In principle, the primal network should be trained first on the joint
+  θD∗ ∈ argmax Ez L ΦP (λL , z; θP∗ ), λL ; z ,                    (8)
+            θD                                                               problem-multiplier distribution before training the dual network with
+                                     h                      i               the primal parameters held fixed. However, the multiplier distribution
+            with    θP∗ ∈ argmin Eλ,z L ΦP (λ, z; θP ), λ; z , (9)           is generally unknown a priori as it depends on the multipliers gener-
+                             θP
+                                                                             ated by the dual network during execution. The nested formulation in
+where λL = ΦD (z; θD , θP∗ ) is the final output of the dual network.        (8)–(9) provides a solution to this challenge by enabling an alternat-
+The joint training objective in (8)–(9) guides the final outputs but         ing training scheme. First, we freeze the primal parameters and train
+Algorithm 1 Primal Network Training                                      Algorithm 2 Dual Network Training
+ 1: Inputs: θP , θD , µ, ϵP , ηP                                          1: Inputs: θP , θD , ν, ϵD , ηD
+ 2: for each epoch do                                                     2: for each epoch do
+ 3:     for each primal batch do                                          3:     for each dual batch do
+ 4:         Sample {z(j) }N    j=1 ∼ Dz                                   4:         Sample {z(i) }N   i=1 ∼ Dz
+ 5:        Sample {λ(i,j) }M,N
+                            i=1,j=1 from the trajectories by θD
+                                                                          5:         Execute the networks to generate {(xl,(i) , λl,(i) )}l,i
+                                                                                                             
+ 6:        Execute the primal network to generate {e xk,(i,j) }k,i,j      6:        ℓ(θD ) ← −Lb xL , λL ; z
+                                                                                                         h                           i
+ 7:        ℓ(θP ) ← L(e
+                      b xK , λ; z)                                                             P
+                                                                        7:                           b f (xl ; z − βl f (xl−1 ; z)
+                                                                                    C(θD , ν) ← l νl · E
+ 8:                           b xk , λ; z)∥−αk∥∇L(e
+           Ck (θP , µ) ← µk ∥∇L(e                 b xk−1 , λ; z)∥                                                         
+                                                                        8:        θD ← θD − ϵD · ∇ℓ(θD ) + ∇θD C(θD , ν)
+                                            P
+ 9:        θP ← θP − ϵP · ∇ℓ(θP ) + ∇θP k Ck (θP , µ)                     9:
+                                                                                           
+                                                                                    ν ← ν + ηD · ∇ν C(θD , ν) +
+                                                                                                               
+                                       
+10:        µ ← µ + ηP · ∇µ C(θP , µ) +                                   10:     end for
+11:     end for                                                          11: end for
+12: end for                                                              12: return θD , ν
+13: return θP , µ
+
+                                                                         In our models, the ℓ-th unrolled layer consists of a cascade of T graph
+the dual network on the outer objective for a fixed number of epochs,    convolutional sub-layers [26]. The t-th sub-layer filters the previous
+producing layerwise multiplier trajectories. These trajectories then              (ℓ)
+                                                                         output Xt−1 and maps it to
+serve as training data for the primal network, which we update for a
+fixed number of epochs. We keep alternating between training the                                         Kh
+                                                                                                                              !
+                                                                                            (ℓ)
+                                                                                                         X      h (ℓ)     (ℓ)
+two networks to ensure that each is optimized with data generated by                      Xt = φ              S Xt−1 Θt,h ,                 (17)
+the current state of the other.                                                                         h=0
+     Note that although we replace the original convex problem with             (ℓ)         Ft−1 ×Ft
+nonconvex training problems solved with the same algorithm we            where Θt,h    ∈ R              is the set of learnable parameters, Kh
+unroll, the computational cost of the iterative algorithm is now paid    represents the filter taps, and φ is a nonlinear activation function.
+offline. The iterative algorithm is used once during training, after         In the primal network, the input to the kth unrolled layer is
+which each new instance is solved by a single forward pass of a neural                                                 
+network, significantly lowering per-instance latency and compute.                                 e (k) = x
+                                                                                                  X
+                                                                                                              ek−1 q
+                                                                                                                          ,                  (18)
+                                                                                                    0          λ      b
+
+                    5. NUMERICAL RESULTS                                 where xek−1 is the output of the previous unrolled layer, and λ, q and
+                                                                         b are input data. The output of the unrolled layer is then
+We consider a mixed-integer quadratic program (MIQP) with linear
+inequality constraints, formulated as:                                                   ek = x
+                                                                                         x              e (k) Wk + ck ,
+                                                                                              ek−1 + MP X                                   (19)
+                                                                                                          T
+
+                   min        1
+                              2
+                                x⊤ Px + q⊤ x                     (12)          e (k) is the output of the T -th graph sub-layer, and Wk ∈ RFT
+                                                                         where X
+                     x                                                           T
+                                                                         and ck ∈ Rn are the parameters of the readout layer. The selection
+                    s.t.        Āx ≤ b̄,                        (13)
+                                                                         matrix MP extracts the outputs associated with the n variable nodes.
+                                xi ∈ {−1, 1}, ∀i ∈ I,            (14)    Similarly, the input to each unrolled dual layer is constructed as
+where x ∈ Rn , q ∈ Rn , Ā ∈ Rm×n , b̄ ∈ Rm , P ∈ Rn×n is
+                                                                                                                     
+                                                                                                   (l)      xl−1 q
+PSD, and I is a set that contains the indices of the binary variables                            X0 =                   ,                   (20)
+                                                                                                            λl−1 b
+with cardinality |I| = r ≤ n. Solving the MIQP in (12)–(14) is
+NP-hard because of the binary constraints. To mitigate this issue, we     where λl−1 is the previous dual estimate and xl−1 is the correspond-
+consider a convex relaxation of (14) in the form of box constraints,     ing estimate of the primal network. The output of the unrolled layer
+i.e., −1 ≤ xi ≤ 1, ∀i ∈ I. The linear constraints in (13) can be         is expressed as
+combined with the new ones, producing the relaxed MIQP problem,                                   
+                                                                                                                   (l)
+                                                                                                                               
+                                                                                      λl = φrelu yl−1 + MD XT Wl + cl ,                   (21)
+              min          1
+                           2
+                             x⊤ Px + q⊤ x   s.t   Ax ≤ b,        (15)
+               x
+                                                                          where MD selects the constraint-node values, and Wl ∈ RFT and
+whereA ∈ R(m+2r)×n         and b ∈ Rm+2r. Specifically, we define     cl ∈ Rm+2r are learnable parameters—distinct from those of the
+A = Ā; M; −M and b = b̄ ; 1r ; 1r . Here, M ∈ {0, 1}r×n
+                      
+                                                                         primal layers despite the shared notation.
+is a selection matrix whose j-th row is the standard basis vector            Experiment Setup. We construct a dataset of 800 MIQP prob-
+e⊤ij for ij ∈ I, and 1r is an r-dimensional all-ones vector. The         lems with n = 80, m = 45 and r = 10. Both primal and dual
+Lagrangian function associated with the relaxed problem      (15) is     networks consist of K = 14 unrolled layers with T = 3 graph
+defined as L(x, λ) = 12 x⊤ Px + q⊤ x + λ⊤ Ax − b .
+                                                        
+                                                                         sub-layers. In both networks, each graph filter aggregates informa-
+     To facilitate using primal and dual GNNs, we model the MIQP         tion from Kh = 1 hop neighbors, processes Fl = Fk = 32 hidden
+problem with the graph adjacency, where the n variable nodes pre-        features, and is followed by a tanh activation function. After a grid
+ceding the m + 2r constraint nodes for notational convenience,           search, we set the learning rates to: ϵP = 10−4 , ϵD = 7 × 10−4 ,
+                                                                         ηP = 10−4 and ηD = 10−3 . The constraint parameters αk = 0.98
+                                   P A⊤
+                                         
+                          S =               .                   (16)     and βl = 0.95 are shared across the layers. For evaluation, we com-
+                                   A   0                                 pare our approach to its unconstrained counterpart, which resembles
+                                                                Ours - Constrained Dual Unrolling                                           Ablation - Unconstrained Dual Unrolling
+                                                                                                                                                                                                  101
+
+
+
+
+                                                                                                                                                                        Complementary Slackness
+                                                                               Constraint Violation
+      xk , λ)k2
+
+
+
+
+                 101
+k∇x L(e
+
+
+
+
+                                                                                                      100
+                                                                                                                                                                                                  100
+                 100
+
+
+                   0                                                                                   0
+                        0        2   4      6         8    10   12    14                                     0    2        4        6       8     10    12        14                                             0       2   4      6       8    10   12   14
+                                         Primal Layer k                                                                        Dual Layer l                                                                                       Dual Layer l
+
+Fig. 2: Descent Guarantees. (Left) The gradient norm of the Lagrangian across the primal layers. (Middle) The constraint violation across
+the dual layers. (Right) The complementary slackness λ⊤    L f (xl ) across the unrolled dual layers. The constrained model exhibits a consistent
+decrease in all three quantities across layers, whereas the unconstrained model shows a more oscillatory pattern.
+                            Ours - Constrained Dual Unrolling                  Ablation - Unconstrained Dual Unrolling                                            Baseline - Iterative DA                                           Baseline - Naive GNN
+                  1.5
+                                                                                                       2.0                                                                                                   4
+     MSE in x
+
+
+
+
+                                                                                      MSE in x
+
+
+
+
+                                                                                                                                                                                                  MSE in x
+                  1.0                                                                                  1.5                                                                                                   3
+
+                                                                                                       1.0                                                                                                   2
+                  0.5
+                                                                                                       0.5                                                                                                   1
+
+                  0.0                                                                                  0.0                                                                                                   0
+                            60       80         100       120   140                                          10       20       30        40       50         60                                                      0       10             20        30
+                                                n                                                                                       m                                                                                               r
+                 0.15
+                                                                                                0.100                                                                                                 0.3
+Mean Violation
+
+
+
+
+                                                                           Mean Violation
+
+
+
+
+                                                                                                                                                                                    Mean Violation
+                 0.10                                                                           0.075
+                                                                                                                                                                                                      0.2
+                                                                                                0.050
+                 0.05
+                                                                                                                                                                                                      0.1
+                                                                                                0.025
+
+                 0.00                                                                           0.000                                                                                                 0.0
+                            60       80         100       120   140                                          10       20       30        40       50         60                                                      0       10             20        30
+                                                n                                                                                       m                                                                                               r
+
+Fig. 3: Robustness under OOD problems, varying (left) the number of optimization variables n, (middle) the number of linear constraints
+m, and (right) the number of integer-valued variables r. The red dotted line represents the in-distribution scenario: n = 80, m = 45, and
+r = 10. Our constrained dual unrolling outperforms the other learning-based methods in optimality (top) and feasibility (bottom) across all
+OOD scenarios.
+
+the one in [27], except that we use unsupervised training losses rather                                                                 performs its unconstrained counterpart in optimality and feasibil-
+than their supervised objective. We also compare to a standard GNN                                                                      ity. The performance gap widens as the constraint-to-variable ratio
+trained with a supervised loss [28] to predict the primal solutions.                                                                    (m + 2r)/n increases, suggesting that the descent constraints confer
+     Performance. We evaluate the trained primal and dual GNNs                                                                          OOD robustness. The constrained model also surpasses the standard
+over a testset of unseen 400 problems. Fig. 2 shows that our models                                                                     GNN, which is attributed to our unsupervised training objectives
+satisfy the descent constraints on the testset as they exhibit a con-                                                                   and to jointly training a dual network that predicts the optimal dual
+sistent decrease in the Lagrangian gradient norm and in the mean                                                                        variable along with the primal solution. When the ODD multiplier
+constraint violations across the layers. In contrast, the ablated model,                                                                distribution remains close to that of the in-distribution case, our model
+trained without descent constraints, exhibits more pronounced os-                                                                       can produce solutions that match–or even exceed–in-distribution per-
+cillations. These differences are not aesthetic, as the unconstrained                                                                   formance, whereas the naive GNN does not realize these gains.
+model does not reach the same performance as the constrained one
+in predicting the true (x∗ , λ∗ ) pairs. This gap is more evident in                                                                                                             6. CONCLUSIONS
+Fig. 3 (the red dotted lines), where the constrained model attains a
+mean-squared error (MSE) of 0.133 in x and a mean constraint vio-                                                                       This paper introduced two coupled GNNs trained to jointly find
+lation of 0.049, compared to 0.454 and 0.094 for the unconstrained                                                                      the Lagrangian saddle point and forced to mimic the DA dynamics
+model. This improvement comes with negligible overhead, since our                                                                       by imposing layerwise monotonic descent and ascent constraints.
+formulation introduces one meta dual variable per layer, which does                                                                     Once trained, solving new instances reduces to a single forward pass,
+not alter the dominant computational components of the update.                                                                          significantly cutting per-instance latency and compute. In MIQP
+     Fig. 3 also shows OOD results obtained by varying one problem                                                                      experiments, the constrained models consistently outperformed both
+parameter while keeping the others fixed. The distribution shift inten-                                                                 unconstrained unrolling and supervised GNN in OOD robustness
+sifies as (m + 2r)/n increases, yielding more challenging instances.                                                                    (e.g., lower MSE and constraint violation).
+Across all OOD scenarios, our constrained model consistently out-
+                        7. REFERENCES                                    [14] Samar Hadou, Navid NaderiAlizadeh, and Alejandro Ribeiro,
+                                                                              “Stochastic unrolled federated learning,” arXiv preprint
+ [1] Vishal Monga, Yuelong Li, and Yonina C. Eldar, “Algorithm                arXiv:2305.15371, 2023.
+     unrolling: Interpretable, efficient deep learning for signal and
+                                                                         [15] Masatoshi Nagahama, Koki Yamada, Yuichi Tanaka, Stanley H
+     image processing,” IEEE Signal Processing Magazine, vol. 38,
+                                                                              Chan, and Yonina C Eldar, “Graph signal restoration using
+     no. 2, pp. 18–44, Mar. 2021.
+                                                                              nested deep algorithm unrolling,” IEEE transactions on signal
+ [2] Karol Gregor and Yann LeCun, “Learning fast approximations               processing, vol. 70, pp. 3296–3311, 2022.
+     of sparse coding,” in Proceedings of the 27th International         [16] Jianjun Zhang, Christos Masouros, Fan Liu, Yongming Huang,
+     Conference on Machine Learning, June 2010, ICML’10, pp.                  and A. Lee Swindlehurst, “Low-complexity joint radar-
+     399–406.                                                                 communication beamforming: From optimization to deep un-
+ [3] Kai Zhang, Luc Van Gool, and Radu Timofte, “Deep unfold-                 folding,” IEEE Journal of Selected Topics in Signal Processing,
+     ing network for image super-resolution,” in Proceedings of               pp. 1–16, 2025.
+     the IEEE/CVF Conference on Computer Vision and Pattern              [17] Junwen Yang, Ang Li, Xuewen Liao, and Christos Masouros,
+     Recognition, 2020, pp. 3217–3226.                                        “ADMM-SLPNet: A model-driven deep learning framework
+ [4] Chong Mou, Qian Wang, and Jian Zhang, “Deep generalized                  for symbol-level precoding,” IEEE Transactions on Vehicular
+     unfolding networks for image restoration,” in Proceedings of             Technology, vol. 73, no. 1, pp. 1376–1381, 2024.
+     the IEEE/CVF Conference on Computer Vision and Pattern              [18] Bingheng Li, Linxin Yang, Yupeng Chen, Senmiao Wang,
+     Recognition, 2022, pp. 17399–17410.                                      Haitao Mao, Qian Chen, Yao Ma, Akang Wang, Tian Ding, Jil-
+ [5] Marion Savanier, Emilie Chouzenoux, Jean-Christophe Pesquet,             iang Tang, et al., “PDHG-unrolled learning-to-optimize method
+     and Cyril Riddell, “Deep unfolding of the dbfb algorithm with            for large-scale linear programming,” in Proceedings of the 41st
+     application to roi ct imaging with limited angular density,” IEEE        International Conference on Machine Learning. PMLR, 2024,
+     Transactions on Computational Imaging, vol. 9, pp. 502–516,              pp. 29164–29180.
+     2023.                                                               [19] Quentin Cappart, Didier Chételat, Elias B Khalil, Andrea Lodi,
+ [6] Ping Wang, Lishun Wang, Gang Qu, Xiaodong Wang, Yulun                    Christopher Morris, and Petar Veličković, “Combinatorial opti-
+     Zhang, and Xin Yuan, “Proximal algorithm unrolling: Flexible             mization and reasoning with graph neural networks,” Journal of
+     and efficient reconstruction networks for single-pixel imaging,”         Machine Learning Research, vol. 24, no. 130, pp. 1–61, 2023.
+     in Proceedings of the Computer Vision and Pattern Recognition       [20] Maxime Gasse, Didier Chételat, Nicola Ferroni, Laurent Char-
+     Conference, 2025, pp. 411–421.                                           lin, and Andrea Lodi, “Exact combinatorial optimization with
+ [7] Samar Hadou, Navid NaderiAlizadeh, and Alejandro Ribeiro,                graph convolutional neural networks,” in Advances in neural
+     “Robust stochastically-descending unrolled networks,” IEEE               information processing systems, 2019, vol. 32.
+     Transactions on Signal Processing, vol. 72, pp. 5484–5499,          [21] Ziang Chen, Jialin Liu, Xinshang Wang, and Wotao Yin, “On
+     2024.                                                                    representing linear programs by graph neural networks,” in
+ [8] Xiaoyang Wang and Hongping Gan, “UFC-NET: Unrolling                      International Conference on Learning Representations, 2023.
+     fixed-point continuous network for deep compressive sensing,”       [22] Stephen P Boyd and Lieven Vandenberghe, Convex optimiza-
+     in Proceedings of the IEEE/CVF Conference on Computer Vi-                tion, Cambridge university press, 2004.
+     sion and Pattern Recognition, 2024, pp. 25149–25159.
+                                                                         [23] Samar Hadou, Charilaos I Kanatsoulis, and Alejandro Ribeiro,
+ [9] Qingping Zhou, Jiayu Qian, Junqi Tang, and Jinglai Li, “Deep             “Space-time graph neural networks,” in International Confer-
+     unrolling networks with recurrent momentum acceleration for              ence on Learning Representations (ICLR), 2022.
+     nonlinear inverse problems,” Inverse Problems, vol. 40, no. 5,
+     pp. 055014, 2024.                                                   [24] Dimitri P Bertsekas, “Nonlinear programming,” Journal of
+                                                                              the Operational Research Society, vol. 48, no. 3, pp. 334–334,
+[10] Chengyu Fang, Chunming He, Fengyang Xiao, Yulun Zhang,                   1997.
+     Longxiang Tang, Yuelin Zhang, Kai Li, and Xiu Li, “Real-world
+                                                                         [25] Luiz FO Chamon, Santiago Paternain, Miguel Calvo-Fullana,
+     image dehazing with coherence-based pseudo labeling and co-
+                                                                              and Alejandro Ribeiro, “Constrained learning with non-convex
+     operative unfolding network,” Advances in Neural Information
+                                                                              losses,” IEEE Transactions on Information Theory, 2022.
+     Processing Systems, vol. 37, pp. 97859–97883, 2024.
+                                                                         [26] Fernando Gama, Elvin Isufi, Geert Leus, and Alejandro Ribeiro,
+[11] Chunming He, Rihan Zhang, Fengyang Xiao, Chenyu Fang,
+                                                                              “Graphs, convolutions, and neural networks: From graph filters
+     Longxiang Tang, Yulun Zhang, Linghe Kong, Deng-Ping Fan,
+                                                                              to graph neural networks,” IEEE Signal Processing Magazine,
+     Kai Li, and Sina Farsiu, “RUN: Reversible unfolding network
+                                                                              vol. 37, pp. 128–138, Nov. 2020.
+     for concealed object segmentation,” in Proceedings of the 42nd
+     International Conference on Machine Learning, 2025.                 [27] Seonho Park and Pascal Van Hentenryck, “Self-supervised
+                                                                              primal-dual learning for constrained optimization,” in Pro-
+[12] Masako Kishida and Masaki Ogura, “Temporal deep unfold-
+                                                                              ceedings of the AAAI Conference on Artificial Intelligence, Jun.
+     ing for constrained nonlinear stochastic optimal control,” IET
+                                                                              2023, vol. 37, pp. 4052–4060.
+     Control Theory & Applications, vol. 16, no. 2, pp. 139–150,
+     2022.                                                               [28] Ziang Chen, Xiaohan Chen, Jialin Liu, Xinshang Wang, and
+                                                                              Wotao Yin, “Expressive power of graph neural networks for
+[13] Carla Bertocchi, Emilie Chouzenoux, Marie-Caroline Cor-
+                                                                              (mixed-integer) quadratic programs,” in Proceedings of the
+     bineau, Jean-Christophe Pesquet, and Marco Prato, “Deep
+                                                                              42nd International Conference on Machine Learning, 2025, pp.
+     unfolding of a proximal interior point method for image restora-
+                                                                              1–32.
+     tion,” Inverse Problems, vol. 36, no. 3, pp. 034005, 2020.
+
