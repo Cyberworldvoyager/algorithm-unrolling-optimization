@@ -339,6 +339,96 @@ class DimensionAgnosticLISTA(nn.Module):
 
 **关键**: 参数量与维度 $n$ 无关，因此可以处理任意维度的输入。
 
+### 3.5 基于序列模型的 LISTA
+
+除了上述方法，我们还尝试使用序列模型（RNN、LSTM、Transformer）来建模优化求解过程。
+
+#### 3.5.1 RNN-LISTA
+
+**核心思想**: 用 RNN 建模迭代更新规则：
+
+$$h_t = \text{RNN}(h_{t-1}, [x_t, g_t])$$
+$$x_{t+1} = x_t + \eta \cdot W \cdot h_t$$
+
+其中 $h_t$ 是隐藏状态，$g_t$ 是梯度。
+
+**优势**:
+- 可以处理任意迭代次数（动态展开）
+- 学习复杂的更新规则
+- 隐藏状态可以记住历史信息
+
+#### 3.5.2 LSTM-LISTA
+
+**核心思想**: 用 LSTM 处理长程依赖：
+
+$$(h_t, c_t) = \text{LSTM}(h_{t-1}, c_{t-1}, [x_t, g_t])$$
+$$x_{t+1} = x_t + \eta \cdot W \cdot h_t$$
+
+**优势**:
+- LSTM 可以更好地处理长程依赖
+- 细胞状态可以记住长期信息
+- 适合需要多步推理的优化问题
+
+#### 3.5.3 Transformer-LISTA
+
+**核心思想**: 用自注意力捕捉迭代间的关系：
+
+$$\text{attn} = \text{SelfAttn}([x_1, x_2, ..., x_t])$$
+$$x_{t+1} = x_t + \eta \cdot W \cdot \text{attn}$$
+
+**优势**:
+- 自注意力可以捕捉任意迭代间的关系
+- 并行计算效率高
+- 可以学习全局的优化策略
+
+#### 3.5.4 PyTorch 实现 (LSTM-LISTA)
+
+```python
+class LSTMLISTA(nn.Module):
+    """LSTM-LISTA: 用 LSTM 建模优化过程。"""
+
+    def __init__(self, n, T=10, hidden_dim=32):
+        super().__init__()
+        self.n = n
+        self.T = T
+        self.hidden_dim = hidden_dim
+
+        # LSTM 单元
+        self.lstm = nn.LSTMCell(input_size=2 * n, hidden_size=hidden_dim)
+
+        # 从隐藏状态到更新量
+        self.hidden_to_update = nn.Linear(hidden_dim, n)
+
+        # 可学习的步长
+        self.eta = nn.Parameter(torch.tensor(0.1))
+
+    def forward(self, b, A, x0=None):
+        batch_size = b.shape[0]
+        if A.dim() == 2:
+            A = A.unsqueeze(0).expand(batch_size, -1, -1)
+        n = A.shape[2]
+
+        x = x0 if x0 is not None else torch.zeros(batch_size, n, device=b.device)
+        h = torch.zeros(batch_size, self.hidden_dim, device=b.device)
+        c = torch.zeros(batch_size, self.hidden_dim, device=b.device)
+
+        for _ in range(self.T):
+            # 计算梯度
+            Ax = torch.bmm(A, x.unsqueeze(-1)).squeeze(-1)
+            residual = Ax - b
+            grad = torch.bmm(A.transpose(1, 2), residual.unsqueeze(-1)).squeeze(-1)
+
+            # LSTM 更新
+            lstm_input = torch.cat([x, grad], dim=-1)
+            h, c = self.lstm(lstm_input, (h, c))
+
+            # 更新 x
+            update = self.hidden_to_update(h)
+            x = x + self.eta * update
+
+        return x
+```
+
 ---
 
 ## 4. 实验设置
@@ -477,6 +567,21 @@ class DimensionAgnosticLISTA(nn.Module):
 | 0.100 | 0.610 | 0.843 | 1.38× |
 
 **分析**: LISTA-Momentum 在所有噪声水平下都优于 ISTA，鲁棒性良好。
+
+### 5.5 序列模型对比
+
+| 方法 | 误差 | 参数量 | vs ISTA | 说明 |
+|------|------|--------|---------|------|
+| ISTA | 0.836 | N/A | 1.00× | 基准 |
+| FISTA | 0.812 | N/A | 1.03× | 动量加速 |
+| RNN-LISTA | 1.128 | 48,265 | 0.74× | 需要更多训练 |
+| LSTM-LISTA | 1.099 | 62,153 | 0.76× | 需要更多训练 |
+| Transformer-LISTA | 1.003 | 17,257 | 0.83× | 需要更多训练 |
+
+**分析**:
+- 序列模型在当前训练配置下性能不如 LISTA-Momentum
+- 可能需要更多训练数据和更长的训练时间
+- 序列模型的优势在于可以处理任意迭代次数（动态展开）
 
 ---
 
