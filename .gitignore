@@ -43,9 +43,9 @@ env/
 # Results (optional - uncomment if you want to include)
 # *.json
 
-# Images (optional - uncomment if you want to include)
-# *.png
-# *.jpg
+# Generated images
+*.png
+*.jpg
 
 # OS
 .DS_Store
