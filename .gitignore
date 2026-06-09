@@ -43,9 +43,10 @@ env/
 # Results (optional - uncomment if you want to include)
 # *.json
 
-# Generated images
-*.png
+# Generated images (但保留报告引用的图)
 *.jpg
+*.png
+!report/*.png
 
 # OS
 .DS_Store

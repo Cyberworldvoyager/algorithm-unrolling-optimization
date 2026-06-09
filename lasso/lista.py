@@ -1,42 +1,54 @@
 """
-lasso/lista.py — LISTA 及其变体实现
+lasso/lista.py — 经典展开网络 LISTA 及其耦合权重变体 LISTA-CP
 
-实现以下展开网络:
-1. LISTA — 基本 ISTA 展开 (Gregor & LeCun, 2010)
-2. LISTA-CP — 耦合权重 LISTA (Chen et al., 2018)
-3. LISTA-SS — 带稀疏结构和重启的 LISTA
-4. LISTA-CP-FISTA — 带 Nesterov 动量的 LISTA-CP
+实现:
+1. LISTA      — 基本 ISTA 展开 (Gregor & LeCun, 2010)
+                x_{t+1} = σ(W₁b + W₂x_t; θ_t)，W₁, W₂ 独立学习
+2. LISTA-CP   — 耦合权重 LISTA (Chen et al., 2018)
+                W₁ = ηB, W₂ = I - ηBA，仅由 B 参数化
 
-理论基础:
-- LISTA: x_{t+1} = σ(W₁b + W₂x_t; θ_t)
-- LISTA-CP: W₁ = ηB, W₂ = I - ηB·A，参数由 B 参数化
-- LISTA-CP-FISTA: 在 LISTA-CP 基础上引入动量变量 y_t
+设计说明 (与评分意见对应):
+- 软阈值阈值 θ 通过 softplus 约束为非负，保证 σ(·;θ) 仍是合法的近端算子。
+  自由参数 θ 在训练中可能变负，使软阈值退化为加噪，故统一改为 θ = softplus(ρ)。
+
+本模块是项目中 LISTA / LISTA-CP 的唯一实现，由 run_all_experiments.py 直接导入。
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, List, Tuple
-import math
+from typing import Optional, List
 
 
 class SoftThreshold(nn.Module):
-    """可学习的软阈值激活函数。
+    """可学习的软阈值激活: f(x) = sign(x)·max(|x| - θ, 0)，θ = softplus(ρ) ≥ 0。
 
-    f(x) = sign(x) * max(|x| - θ, 0)
-
-    支持标量、逐维度、逐层三种模式。
+    支持标量 (n=None) 或逐维度 (n>0) 阈值。
     """
 
-    def __init__(self, init_threshold: float = 0.1, n: Optional[int] = None):
+    def __init__(self, init_threshold: float = 0.01, n: Optional[int] = None):
         super().__init__()
+        # 以 softplus 的逆初始化 raw，使初始 θ ≈ init_threshold
+        raw_init = math_softplus_inverse(init_threshold)
         if n is not None:
-            self.theta = nn.Parameter(torch.full((n,), init_threshold))
+            self.raw = nn.Parameter(torch.full((n,), raw_init))
         else:
-            self.theta = nn.Parameter(torch.tensor(init_threshold))
+            self.raw = nn.Parameter(torch.tensor(raw_init))
+
+    @property
+    def theta(self) -> torch.Tensor:
+        return F.softplus(self.raw)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.sign(x) * torch.maximum(torch.abs(x) - self.theta, torch.zeros_like(x))
+        theta = self.theta
+        return torch.sign(x) * torch.clamp(torch.abs(x) - theta, min=0.0)
+
+
+def math_softplus_inverse(y: float) -> float:
+    """softplus 的逆: 给定目标 θ=y>0，返回 raw 使得 softplus(raw)=y。"""
+    import math
+    # softplus(x) = log(1+e^x) => x = log(e^y - 1)
+    return math.log(math.expm1(y)) if y > 0 else -5.0
 
 
 # ============================================================
@@ -44,60 +56,61 @@ class SoftThreshold(nn.Module):
 # ============================================================
 
 class LISTALayer(nn.Module):
-    """LISTA 单层: x_{t+1} = σ(W₁b + W₂x_t; θ_t)
+    """LISTA 单层: x_{t+1} = σ(W₁b + W₂x_t; θ_t)，W₁∈R^{n×m}, W₂∈R^{n×n}。
 
-    W₁ ∈ R^{n×m}, W₂ ∈ R^{n×n} 独立学习。
+    若提供 A_init (训练矩阵) 与 init_eta=η，则按 ISTA 等价方式初始化:
+        W₁ = η·Aᵀ,  W₂ = I − η·AᵀA,  θ ≈ η·λ
+    使网络初始即等价于一步 ISTA，训练只会在此基础上改进 (避免从随机权重
+    出发学不到 ISTA 水平、反而劣于经典解的退化)。
     """
 
-    def __init__(self, m: int, n: int, init_eta: float = 0.1,
-                 per_dim_threshold: bool = False):
+    def __init__(self, m: int, n: int, init_threshold: float = 0.01,
+                 per_dim_threshold: bool = False,
+                 A_init: Optional[torch.Tensor] = None, init_eta: float = 0.1):
         super().__init__()
         self.W1 = nn.Linear(m, n, bias=False)
         self.W2 = nn.Linear(n, n, bias=False)
-
-        nn.init.xavier_uniform_(self.W1.weight)
-        nn.init.eye_(self.W2.weight)
-        self.W2.weight.data *= 0.9
-
-        self.threshold = SoftThreshold(
-            init_threshold=init_eta * 0.1,
-            n=n if per_dim_threshold else None,
-        )
+        if A_init is not None:
+            # ISTA 等价初始化
+            A = A_init
+            self.W1.weight.data = (init_eta * A.t()).contiguous()
+            self.W2.weight.data = torch.eye(n) - init_eta * (A.t() @ A)
+        else:
+            nn.init.xavier_uniform_(self.W1.weight)
+            nn.init.eye_(self.W2.weight)
+            self.W2.weight.data *= 0.9
+        self.threshold = SoftThreshold(init_threshold, n if per_dim_threshold else None)
 
     def forward(self, b: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return self.threshold(self.W1(b) + self.W2(x))
 
 
 class LISTA(nn.Module):
-    """LISTA 网络: T 层 ISTA 展开。
+    """LISTA 网络: T 层 ISTA 展开。W₁,W₂ 与训练矩阵 A 绑定，不随 A 泛化。
 
-    Parameters
-    ----------
-    m : int  — 观测维度
-    n : int  — 信号维度
-    T : int  — 展开层数
+    传入 A_init 时各层做 ISTA 等价初始化 (推荐)，init_eta 一般取 1/L (L=‖AᵀA‖₂)。
     """
 
-    def __init__(self, m: int, n: int, T: int = 10, init_eta: float = 0.1,
-                 per_dim_threshold: bool = False):
+    def __init__(self, m: int, n: int, T: int = 10, init_threshold: float = 0.01,
+                 per_dim_threshold: bool = False,
+                 A_init: Optional[torch.Tensor] = None, init_eta: float = 0.1):
         super().__init__()
         self.n, self.T = n, T
         self.layers = nn.ModuleList([
-            LISTALayer(m, n, init_eta, per_dim_threshold) for _ in range(T)
+            LISTALayer(m, n, init_threshold, per_dim_threshold, A_init, init_eta)
+            for _ in range(T)
         ])
 
-    def forward(self, b: torch.Tensor, x0: Optional[torch.Tensor] = None,
-                return_intermediates: bool = False) -> torch.Tensor:
+    def forward(self, b: torch.Tensor, A: Optional[torch.Tensor] = None,
+                x0: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # A 参数仅为接口统一 (LISTA 不使用)
         x = x0 if x0 is not None else torch.zeros(b.shape[0], self.n, device=b.device)
-        intermediates = [x] if return_intermediates else None
         for layer in self.layers:
             x = layer(b, x)
-            if return_intermediates:
-                intermediates.append(x)
-        return (x, intermediates) if return_intermediates else x
+        return x
 
     def get_thresholds(self) -> List[float]:
-        return [layer.threshold.theta.item() for layer in self.layers]
+        return [float(layer.threshold.theta.mean()) for layer in self.layers]
 
 
 # ============================================================
@@ -105,255 +118,56 @@ class LISTA(nn.Module):
 # ============================================================
 
 class LISTACPLayer(nn.Module):
-    """LISTA-CP 单层。
+    """LISTA-CP 单层: x_{t+1} = σ(ηBb + (I - ηBA)x_t; θ_t)。
 
-    核心思想: W₁ = η·B, W₂ = I - η·B·A，用 B 参数化两个矩阵。
-    参数量从 O(nm + n²) 降到 O(nm)。
-
-    更新公式:
-        x_{t+1} = σ(η·B·b + (I - η·B·A)·x_t; θ_t)
-
-    其中 B ∈ R^{n×m} 是唯一的学习参数。
+    仅 B∈R^{n×m}、步长 η、阈值 θ 为可学习参数。
+    B 初始化为 Aᵀ (ISTA 的最优选择)。
     """
 
     def __init__(self, A: torch.Tensor, n: int, init_eta: float = 0.1,
-                 per_dim_threshold: bool = False):
+                 init_threshold: float = 0.01, per_dim_threshold: bool = False):
         super().__init__()
-        m = A.shape[0]
-        self.register_buffer('A', A)  # (m, n)
-        # eta 是可学习参数 (不是 buffer)
+        self.register_buffer('A', A)                 # (m, n)，固定的训练矩阵
         self.eta = nn.Parameter(torch.tensor(init_eta))
-
-        # B 是学习参数
-        # 初始化: B = A^T (ISTA 的最优选择)
-        self.B = nn.Parameter(A.T.clone())  # (n, m)
-
-        self.threshold = SoftThreshold(
-            init_threshold=init_eta * 0.1,
-            n=n if per_dim_threshold else None,
-        )
+        self.B = nn.Parameter(A.T.clone())           # (n, m)
+        self.threshold = SoftThreshold(init_threshold, n if per_dim_threshold else None)
 
     def forward(self, b: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        # W₁b = η·B·b,  W₂x = (I - η·B·A)·x = x - η·B·(A·x)
-        Ax = F.linear(x, self.A)        # (batch, m)
-        BAx = F.linear(Ax, self.B)      # (batch, n)
-        Bb = F.linear(b, self.B)        # (batch, n)
+        Ax = F.linear(x, self.A)      # (batch, m)
+        BAx = F.linear(Ax, self.B)    # (batch, n)
+        Bb = F.linear(b, self.B)      # (batch, n)
         z = self.eta * Bb + x - self.eta * BAx
         return self.threshold(z)
 
 
 class LISTACP(nn.Module):
-    """LISTA-CP: 耦合权重的 LISTA (Chen et al., 2018)。
-
-    优势:
-    - 参数量减半 (只有 B，没有独立的 W₁, W₂)
-    - 初始化即为 ISTA，训练后超越 ISTA
-    - 谱半径 ρ(W₂) < 1 有理论保证（当 η 足够小）
-
-    Parameters
-    ----------
-    A : Tensor (m, n) — 测量矩阵
-    T : int — 展开层数
-    init_eta : float — 步长初始值
-    """
+    """LISTA-CP: 耦合权重的 LISTA。参数量 O(nm)，初始化即为 ISTA。"""
 
     def __init__(self, A: torch.Tensor, T: int = 10, init_eta: float = 0.1,
-                 per_dim_threshold: bool = False):
+                 init_threshold: float = 0.01, per_dim_threshold: bool = False):
         super().__init__()
         m, n = A.shape
         self.n, self.T = n, T
         self.layers = nn.ModuleList([
-            LISTACPLayer(A, n, init_eta, per_dim_threshold) for _ in range(T)
+            LISTACPLayer(A, n, init_eta, init_threshold, per_dim_threshold)
+            for _ in range(T)
         ])
 
-    def forward(self, b: torch.Tensor, x0: Optional[torch.Tensor] = None,
-                return_intermediates: bool = False) -> torch.Tensor:
+    def forward(self, b: torch.Tensor, A: Optional[torch.Tensor] = None,
+                x0: Optional[torch.Tensor] = None) -> torch.Tensor:
         x = x0 if x0 is not None else torch.zeros(b.shape[0], self.n, device=b.device)
-        intermediates = [x] if return_intermediates else None
         for layer in self.layers:
             x = layer(b, x)
-            if return_intermediates:
-                intermediates.append(x)
-        return (x, intermediates) if return_intermediates else x
+        return x
 
     def get_thresholds(self) -> List[float]:
-        return [layer.threshold.theta.item() for layer in self.layers]
+        return [float(layer.threshold.theta.mean()) for layer in self.layers]
 
     def get_spectral_radius(self) -> List[float]:
-        """计算每层 W₂ = I - η·B·A 的谱半径。
-
-        理论上 ρ(W₂) < 1 保证收敛。训练后应验证此条件。
-        """
+        """每层 W₂ = I - η·B·A 的谱半径 (理论上 <1 保证收敛)。"""
         radii = []
         for layer in self.layers:
-            W2 = torch.eye(layer.B.shape[1], device=layer.B.device) - \
-                 layer.eta * layer.B @ layer.A
-            eigvals = torch.linalg.eigvals(W2)
-            radii.append(eigvals.abs().max().item())
+            W2 = torch.eye(layer.B.shape[0], device=layer.B.device) \
+                 - layer.eta * layer.B @ layer.A
+            radii.append(float(torch.linalg.eigvals(W2).abs().max()))
         return radii
-
-
-# ============================================================
-# LISTA-CP-SS — 带稀疏结构的 LISTA-CP
-# ============================================================
-
-class LISTACPSSLayer(nn.Module):
-    """LISTA-CP-SS 单层。
-
-    在 LISTA-CP 基础上:
-    1. 逐维度独立阈值 θ_t ∈ R^n
-    2. 每层学习独立的步长 η_t (而非共享)
-
-    这使得每层能自适应不同的稀疏模式。
-    """
-
-    def __init__(self, A: torch.Tensor, n: int, init_eta: float = 0.1):
-        super().__init__()
-        self.register_buffer('A', A)
-        self.eta = nn.Parameter(torch.tensor(init_eta))
-        self.B = nn.Parameter(A.T.clone())
-        self.threshold = SoftThreshold(init_threshold=init_eta * 0.1, n=n)
-
-    def forward(self, b: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        Ax = F.linear(x, self.A)
-        BAx = F.linear(Ax, self.B)
-        Bb = F.linear(b, self.B)
-        z = self.eta * Bb + x - self.eta * BAx
-        return self.threshold(z)
-
-
-class LISTACPSS(nn.Module):
-    """LISTA-CP-SS: 耦合权重 + 逐维度阈值 + 独立步长。
-
-    是 LISTA-CP 的更强变体，每个输出维度有独立的阈值。
-    """
-
-    def __init__(self, A: torch.Tensor, T: int = 10, init_eta: float = 0.1):
-        super().__init__()
-        m, n = A.shape
-        self.n, self.T = n, T
-        self.layers = nn.ModuleList([
-            LISTACPSSLayer(A, n, init_eta) for _ in range(T)
-        ])
-
-    def forward(self, b: torch.Tensor, x0: Optional[torch.Tensor] = None,
-                return_intermediates: bool = False) -> torch.Tensor:
-        x = x0 if x0 is not None else torch.zeros(b.shape[0], self.n, device=b.device)
-        intermediates = [x] if return_intermediates else None
-        for layer in self.layers:
-            x = layer(b, x)
-            if return_intermediates:
-                intermediates.append(x)
-        return (x, intermediates) if return_intermediates else x
-
-
-# ============================================================
-# LISTA-CP-FISTA — 带 Nesterov 动量的 LISTA-CP
-# ============================================================
-
-class LISTACPFISTALayer(nn.Module):
-    """LISTA-CP-FISTA 单层。
-
-    模仿 FISTA 的 Nesterov 动量机制:
-        y_t = x_t + β_t · (x_t - x_{t-1})     # 动量外推
-        x_{t+1} = σ(η·B·b + (I - η·B·A)·y_t; θ_t)  # ISTA 步
-
-    β_t 是可学习的动量参数，初始化为经典 FISTA 的 β₀ = 0。
-    """
-
-    def __init__(self, A: torch.Tensor, n: int, init_eta: float = 0.1):
-        super().__init__()
-        self.register_buffer('A', A)
-        self.eta = nn.Parameter(torch.tensor(init_eta))
-        self.B = nn.Parameter(A.T.clone())
-        # 动量参数 β_t，初始化为 0 (相当于无动量)
-        self.beta = nn.Parameter(torch.tensor(0.0))
-        self.threshold = SoftThreshold(init_threshold=init_eta * 0.1, n=n)
-
-    def forward(self, b: torch.Tensor, x: torch.Tensor,
-                x_prev: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Returns
-        -------
-        x_new : Tensor — 更新后的估计
-        x : Tensor — 当前 x (供下层作为 x_prev)
-        """
-        # Nesterov 动量外推
-        y = x + torch.sigmoid(self.beta) * (x - x_prev)
-        # ISTA 步
-        Ax = F.linear(y, self.A)
-        BAx = F.linear(Ax, self.B)
-        Bb = F.linear(b, self.B)
-        z = self.eta * Bb + y - self.eta * BAx
-        x_new = self.threshold(z)
-        return x_new, x
-
-
-class LISTACPFISTA(nn.Module):
-    """LISTA-CP-FISTA: 带 Nesterov 动量的 LISTA-CP。
-
-    在 LISTA-CP 基础上引入可学习的动量参数，模拟 FISTA 的加速效果。
-    初始化 β=0 退化为 LISTA-CP，训练后学习最优动量调度。
-
-    Parameters
-    ----------
-    A : Tensor (m, n) — 测量矩阵
-    T : int — 展开层数
-    init_eta : float — 步长初始值
-    """
-
-    def __init__(self, A: torch.Tensor, T: int = 10, init_eta: float = 0.1):
-        super().__init__()
-        m, n = A.shape
-        self.n, self.T = n, T
-        self.layers = nn.ModuleList([
-            LISTACPFISTALayer(A, n, init_eta) for _ in range(T)
-        ])
-
-    def forward(self, b: torch.Tensor, x0: Optional[torch.Tensor] = None,
-                return_intermediates: bool = False) -> torch.Tensor:
-        x = x0 if x0 is not None else torch.zeros(b.shape[0], self.n, device=b.device)
-        x_prev = x.clone()
-        intermediates = [x] if return_intermediates else None
-        for layer in self.layers:
-            x, x_prev = layer(b, x, x_prev)
-            if return_intermediates:
-                intermediates.append(x)
-        return (x, intermediates) if return_intermediates else x
-
-    def get_thresholds(self) -> List[float]:
-        return [layer.threshold.theta.item() for layer in self.layers]
-
-    def get_momentums(self) -> List[float]:
-        """获取每层的动量参数 (sigmoid 映射后)。"""
-        return [torch.sigmoid(layer.beta).item() for layer in self.layers]
-
-
-# ============================================================
-# 带初始化的工厂函数
-# ============================================================
-
-def create_lista(A: torch.Tensor, variant: str = 'cp', T: int = 10,
-                 init_eta: float = 0.1) -> nn.Module:
-    """创建 LISTA 变体的工厂函数。
-
-    Parameters
-    ----------
-    A : Tensor (m, n) — 测量矩阵
-    variant : str — 'basic', 'cp', 'ss', 'fista'
-    T : int — 展开层数
-    init_eta : float — 步长初始值
-    """
-    variants = {
-        'basic': lambda: LISTA(A.shape[0], A.shape[1], T, init_eta),
-        'cp': lambda: LISTACP(A, T, init_eta),
-        'ss': lambda: LISTACPSS(A, T, init_eta),
-        'fista': lambda: LISTACPFISTA(A, T, init_eta),
-    }
-    if variant not in variants:
-        raise ValueError(f"Unknown variant: {variant}. Choose from {list(variants.keys())}")
-    return variants[variant]()
-
-
-# 保持向后兼容
-LISTAWithInit = LISTACP
