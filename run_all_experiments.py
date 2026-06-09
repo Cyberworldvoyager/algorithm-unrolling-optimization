@@ -20,7 +20,7 @@ run_all_experiments.py — 全部模型的完整对比实验 (单一入口)
 故 LISTA/CP/Momentum 初始即达经典 ISTA 水平。
 """
 
-import sys, json, os
+import sys, json, os, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import torch
@@ -61,6 +61,11 @@ def set_seed(s):
 
 def to_numpy(t):
     return t.detach().cpu().numpy()
+
+
+def count_params(model):
+    """返回模型可训练参数总数。"""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 # ============================================================
@@ -559,15 +564,21 @@ def plot_W_matrix(trained_ref, save='report/W_matrix_analysis.png'):
 # ============================================================
 
 def main():
+    t_total = time.time()
     print(f"Device: {DEVICE} | seeds={SEEDS} | epochs={NUM_EPOCHS} | batch={BATCH_SIZE}")
     results = {}
     ref_holder = {}
+    timings = {}
     for label, std in [("noiseless", 0.0), ("noisy", 0.01)]:
+        t0 = time.time()
         results[label], ref = run_condition(label, std)
+        timings[label] = round(time.time() - t0, 1)
         ref_holder[label] = ref
 
     # 实验 4: 跨维度
+    t0 = time.time()
     results['cross_dimension'] = run_cross_dimension()
+    timings['cross_dimension'] = round(time.time() - t0, 1)
 
     # 实验 5: W 矩阵谱分析 (用 noiseless 的 Momentum 模型)
     trained_ref = ref_holder['noiseless'][0]
@@ -577,7 +588,44 @@ def main():
         print(f"  Layer {k}: cos(I)={v['cosine_with_I']:.3f} "
               f"rho={v['spectral_radius']:.3f} rank={v['effective_rank']}")
 
-    # 元信息 (便于报告引用真实配置)
+    # 参数量统计 (T=10, n=200, m=100)
+    param_counts = {}
+    n, m, T = N_DIM, M_OBS, DEFAULT_T
+    A_dummy = torch.zeros(m, n)
+    for name in LEARN_MODELS:
+        if name == 'lista':
+            mdl = LISTA(m, n, T)
+        elif name == 'lista_cp':
+            mdl = LISTACP(A_dummy, T)
+        elif name == 'lista_momentum':
+            mdl = LISTAMomentum(m, n, T)
+        elif name == 'da_lista':
+            mdl = DimensionAgnosticLISTA(T)
+        elif name == 'rnn_lista':
+            mdl = RNNLISTA(T)
+        elif name == 'lstm_lista':
+            mdl = LSTMLISTA(T)
+        elif name == 'transformer_lista':
+            mdl = TransformerLISTA(T)
+        else:
+            continue
+        param_counts[name] = count_params(mdl)
+    param_counts['ista'] = 0
+    param_counts['fista'] = 0
+    results['param_counts'] = param_counts
+    print("\n--- 参数量统计 ---")
+    for name in ALL_MODELS:
+        print(f"  {name:18s}: {param_counts.get(name, 0):>10,} params")
+
+    # 保存模型权重 (noiseless 条件下第一个种子的模型)
+    os.makedirs('models', exist_ok=True)
+    trained_ref = ref_holder['noiseless'][0]
+    for name, (model, needs_A) in trained_ref.items():
+        torch.save(model.state_dict(), f'models/{name}_noiseless.pt')
+    print("\n  模型权重已保存到 models/")
+
+    # 元信息
+    timings['total'] = round(time.time() - t_total, 1)
     results['_meta'] = {
         'device': str(DEVICE), 'seeds': SEEDS, 'num_samples': NUM_SAMPLES,
         'num_epochs': NUM_EPOCHS, 'batch_size': BATCH_SIZE, 'lr': LR,
@@ -585,6 +633,8 @@ def main():
         'n_dim': N_DIM, 'default_T': DEFAULT_T,
         'sparsity': SPARSITY, 'optimizer': 'Adam',
         'init': 'ISTA-equivalent (W1=eta*A^T, W2=I-eta*A^T A, eta=1/L)',
+        'early_stopping': {'patience': 15, 'val_frac': 0.15},
+        'wall_time_sec': timings,
     }
 
     # 可视化

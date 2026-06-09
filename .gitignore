@@ -39,6 +39,7 @@ env/
 # PyTorch models
 *.pt
 *.pth
+models/
 
 # Results (optional - uncomment if you want to include)
 # *.json

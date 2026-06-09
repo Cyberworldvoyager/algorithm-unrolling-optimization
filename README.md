@@ -30,12 +30,17 @@ project/
 ├── requirements.txt                # Python 依赖
 ├── .gitignore
 ├── run_all_experiments.py          # 主实验脚本 (唯一入口)
+├── visualize_2d.py                 # 2D 问题优化轨迹可视化
 ├── all_experiment_results.json     # 实验结果 (运行后生成)
 ├── report/
 │   ├── new_report.md               # 最终实验报告
 │   ├── training_comparison.png     # 全模型对比 / 层数影响
 │   ├── cross_dimension.png         # 跨维度泛化
-│   └── W_matrix_analysis.png       # LISTA-Momentum 的 W 矩阵分析
+│   ├── W_matrix_analysis.png       # LISTA-Momentum 的 W 矩阵分析
+│   ├── optimization_trajectory_3d.png  # 2D 优化轨迹 (3D)
+│   └── optimization_trajectory_2d.png  # 2D 优化轨迹 (等高线)
+├── models/                         # 训练好的模型权重 (运行后生成)
+│   └── *_noiseless.pt
 ├── common/                         # 公共工具
 │   ├── metrics.py                  #   评估指标 (relative_error 等)
 │   └── numerical.py                #   数值工具 (proximal_l1 等)
@@ -63,9 +68,9 @@ pip install -r requirements.txt
 python run_all_experiments.py
 ```
 
-脚本会自动选择 GPU（若 `torch.cuda.is_available()`）否则 CPU，依次完成：全模型对比 (T=10, m=100, n=200, k=5)、不同 T∈{5,10,20}、ID/OOD 泛化、跨维度泛化 (训练 n∈{100,150,200}，测试 n∈{50,100,200,300,400})、W 矩阵谱分析，并将结果写入 `all_experiment_results.json`、图表写入 `report/`。
+脚本会自动选择 GPU（若 `torch.cuda.is_available()`）否则 CPU，依次完成：全模型对比 (T=10, m=100, n=200, k=5)、不同 T∈{5,10,20}、ID/OOD 泛化、跨维度泛化 (训练 n∈{100,150,200}，测试 n∈{50,100,200,300,400})、W 矩阵谱分析、参数量统计，并将结果写入 `all_experiment_results.json`、图表写入 `report/`、模型权重写入 `models/`。
 
-训练配置：1000 样本、50 轮、Adam lr=1e-3、验证集早停 patience=10、3 种子。展开网络 (LISTA/CP/Momentum) 采用 ISTA 等价初始化。
+训练配置：1000 样本、最多 50 轮、Adam lr=1e-3、15% 验证集 + 早停 (patience=15)、3 种子。展开网络 (LISTA/CP/Momentum) 采用 ISTA 等价初始化。
 
 > **注**：在 Anaconda + MKL 环境下如遇 `OMP: Error #15`（libiomp 重复初始化），请设置环境变量 `KMP_DUPLICATE_LIB_OK=TRUE` 后再运行。
 

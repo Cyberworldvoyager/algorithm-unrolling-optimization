@@ -394,6 +394,17 @@
       "diff_from_I": 0.8379004145356624
     }
   },
+  "param_counts": {
+    "lista": 600010,
+    "lista_cp": 200020,
+    "lista_momentum": 400030,
+    "da_lista": 11570,
+    "rnn_lista": 4450,
+    "lstm_lista": 5570,
+    "transformer_lista": 5378,
+    "ista": 0,
+    "fista": 0
+  },
   "_meta": {
     "device": "cuda",
     "seeds": [
@@ -412,6 +423,16 @@
     "default_T": 10,
     "sparsity": 5,
     "optimizer": "Adam",
-    "init": "ISTA-equivalent (W1=eta*A^T, W2=I-eta*A^T A, eta=1/L)"
+    "init": "ISTA-equivalent (W1=eta*A^T, W2=I-eta*A^T A, eta=1/L)",
+    "early_stopping": {
+      "patience": 15,
+      "val_frac": 0.15
+    },
+    "wall_time_sec": {
+      "noiseless": 1074.8,
+      "noisy": 1067.2,
+      "cross_dimension": 59.2,
+      "total": 2201.3
+    }
   }
 }
