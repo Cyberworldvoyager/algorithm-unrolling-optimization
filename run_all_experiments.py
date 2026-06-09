@@ -673,20 +673,20 @@ def run_all_experiments():
         results[noise_label]['different_T'] = {}
         for T_val in [5, 10, 20]:
             ista_t, fista_t = evaluate_ista_fista(A_test, B_test, X_test, T_val)
-            lista_t = evaluate(train_lista_basic(50, 200, T_val, noise_std, 10), A_test, B_test, X_test)
-            cp_t = evaluate(train_lista_cp(A_test, T_val, noise_std, 10), A_test, B_test, X_test)
+            lista_t = evaluate(train_lista_basic(50, 200, T_val, noise_std, 5), A_test, B_test, X_test)
+            cp_t = evaluate(train_lista_cp(A_test, T_val, noise_std, 5), A_test, B_test, X_test)
             mom_model = LISTAMomentum(50, 200, T_val)
-            mom_t = evaluate(train_generic(mom_model, T_val, noise_std, 10), A_test, B_test, X_test, needs_A=True)
+            mom_t = evaluate(train_generic(mom_model, T_val, noise_std, 5), A_test, B_test, X_test, needs_A=True)
             da_model = DimAgnosticLISTA(T_val)
-            da_t = evaluate(train_generic(da_model, T_val, noise_std, 10), A_test, B_test, X_test, needs_A=True)
+            da_t = evaluate(train_generic(da_model, T_val, noise_std, 5), A_test, B_test, X_test, needs_A=True)
             rnn_model = RNNLISTA(T_val)
-            rnn_t = evaluate(train_generic(rnn_model, T_val, noise_std, 10), A_test, B_test, X_test, needs_A=True)
+            rnn_t = evaluate(train_generic(rnn_model, T_val, noise_std, 5), A_test, B_test, X_test, needs_A=True)
             lstm_model = LSTMLISTA(T_val)
-            lstm_t = evaluate(train_generic(lstm_model, T_val, noise_std, 10), A_test, B_test, X_test, needs_A=True)
+            lstm_t = evaluate(train_generic(lstm_model, T_val, noise_std, 5), A_test, B_test, X_test, needs_A=True)
             lstm2_model = LSTMLISTAv2(T_val)
-            lstm2_t = evaluate(train_generic(lstm2_model, T_val, noise_std, 10), A_test, B_test, X_test, needs_A=True)
+            lstm2_t = evaluate(train_generic(lstm2_model, T_val, noise_std, 5), A_test, B_test, X_test, needs_A=True)
             trans_model = TransformerLISTA(T_val)
-            trans_t = evaluate(train_generic(trans_model, T_val, noise_std, 10), A_test, B_test, X_test, needs_A=True)
+            trans_t = evaluate(train_generic(trans_model, T_val, noise_std, 5), A_test, B_test, X_test, needs_A=True)
             results[noise_label]['different_T'][str(T_val)] = {
                 'ista': ista_t, 'fista': fista_t,
                 'lista': lista_t, 'lista_cp': cp_t,
