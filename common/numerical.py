@@ -60,6 +60,93 @@ def project_simplex(v: np.ndarray, s: float = 1.0) -> np.ndarray:
     return np.maximum(v - theta, 0.0)
 
 
+def project_soc(z: np.ndarray) -> np.ndarray:
+    """单个二阶锥的闭式投影。
+
+    二阶锥 K = {(t, u) ∈ R × R^{k-1} : ||u||_2 <= t}。
+    设 z = (t, u)，则
+        - 若 ||u|| <= t       : Proj(z) = z
+        - 若 ||u|| <= -t      : Proj(z) = 0
+        - 否则                : Proj(z) = ((t + ||u||) / 2) * (1, u / ||u||)
+    """
+    z = np.asarray(z, dtype=np.float64)
+    t = z[0]
+    u = z[1:]
+    nu = float(np.linalg.norm(u))
+    if nu <= t:
+        return z.copy()
+    if nu <= -t:
+        return np.zeros_like(z)
+    s = 0.5 * (t + nu)
+    out = np.empty_like(z)
+    out[0] = s
+    out[1:] = s * (u / nu)
+    return out
+
+
+def project_cone(x: np.ndarray, block_sizes) -> np.ndarray:
+    """到锥积 K = K_1 × K_2 × ... × K_p 的投影。
+
+    Parameters
+    ----------
+    x : np.ndarray
+        待投影向量，长度等于 sum(block_sizes)。
+    block_sizes : Iterable[int]
+        每个二阶锥块的维度。维度为 1 时退化为 R_+ 上的投影 (max(0, x))。
+    """
+    out = np.empty_like(x, dtype=np.float64)
+    offset = 0
+    for k in block_sizes:
+        end = offset + k
+        if k == 1:
+            out[offset:end] = np.maximum(x[offset:end], 0.0)
+        else:
+            out[offset:end] = project_soc(x[offset:end])
+        offset = end
+    return out
+
+
+def cone_dist(x: np.ndarray, block_sizes) -> float:
+    """计算 x 到锥积 K 的距离 ||x - Proj_K(x)||_2 (锥可行性残差)。"""
+    return float(np.linalg.norm(x - project_cone(x, block_sizes)))
+
+
+def project_soc_torch(z):
+    """torch 版 SOC 投影 (支持 batch，沿最后一维)。
+
+    z shape: (..., k)
+    """
+    import torch
+    t = z[..., :1]
+    u = z[..., 1:]
+    nu = torch.linalg.norm(u, dim=-1, keepdim=True)
+    inside = (nu <= t).float()
+    outside_neg = ((nu <= -t) & (nu > t)).float()  # nu <= -t 且 nu > t
+    middle = 1.0 - inside - outside_neg
+    s = 0.5 * (t + nu)
+    eps = 1e-12
+    u_proj = s * (u / (nu + eps))
+    z_proj_middle = torch.cat([s, u_proj], dim=-1)
+    z_zero = torch.zeros_like(z)
+    return inside * z + middle * z_proj_middle + outside_neg * z_zero
+
+
+def project_cone_torch(x, block_sizes):
+    """torch 版锥积投影。x shape: (..., N)，N = sum(block_sizes)。"""
+    import torch
+    pieces = []
+    offset = 0
+    for k in block_sizes:
+        end = offset + k
+        seg = x[..., offset:end]
+        if k == 1:
+            pieces.append(torch.clamp(seg, min=0.0))
+        else:
+            pieces.append(project_soc_torch(seg))
+        offset = end
+    return torch.cat(pieces, dim=-1)
+
+
 def project_affine(x: np.ndarray, A: np.ndarray, b: np.ndarray) -> np.ndarray:
     """投影到仿射集 {x : Ax = b}。
 
