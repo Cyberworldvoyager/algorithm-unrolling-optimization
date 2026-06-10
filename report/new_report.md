@@ -77,7 +77,7 @@ $$\text{prox}_{\lambda|\cdot|_1}(v)_i = \text{sign}(v_i) \max(|v_i| - \lambda, 0
 
 **ISTA** 的收敛率为 $O(1/k)$，**FISTA** (Beck & Teboulle, 2009) 通过 Nesterov 动量加速至 $O(1/k^2)$：
 
-$$y_k = x_k + \frac{k-1}{k+2}(x_k - x_{k-1}), \quad x_{k+1} = \text{SoftThreshold}(y_k - \eta A^T(Ay_k - b), \eta\lambda)$$
+$$t_{k+1} = \frac{1 + \sqrt{1 + 4t_k^2}}{2}, \quad y_k = x_k + \frac{t_k - 1}{t_{k+1}}(x_k - x_{k-1}), \quad x_{k+1} = \text{SoftThreshold}(y_k - \eta A^T(Ay_k - b), \eta\lambda)$$
 
 ### 2.3 算法展开
 
@@ -100,7 +100,7 @@ $$W_1 = \eta A^T, \quad W_2 = I - \eta A^T A, \quad \eta = 1/L, \quad L = \|A^T 
 
 **ISTA**：基础近端梯度下降，$x_{k+1} = \text{SoftThreshold}(x_k - \eta A^T(Ax_k - b), \eta\lambda)$
 
-**FISTA**：Nesterov 加速版 ISTA，收敛率 $O(1/k^2)$
+**FISTA**：Nesterov 加速版 ISTA，收敛率 $O(1/k^2)$，通过序列 $t_{k+1} = (1+\sqrt{1+4t_k^2})/2$ 计算动量系数 $(t_k-1)/t_{k+1}$
 
 ### 3.2 展开网络
 
@@ -134,11 +134,19 @@ $$x_{k+1} = \text{SoftThreshold}(y_k - \eta \cdot (I + \Delta W) g_k; \theta)$$
 
 #### 3.3.1 DA-LISTA
 
-用 (LayerNorm + 逐元素共享 MLP + 残差) 替代固定 $n \times n$ 矩阵：
+DA-LISTA 与 LISTA-Momentum 共享相同的迭代框架（动量外推 + 梯度变换），区别在于梯度变换部分用逐元素共享 MLP 替代固定 $n \times n$ 矩阵：
 
-$$\bar{g}_k = \text{LayerNorm}(g_k), \quad \hat{g}_k = (\text{MLP}(\bar{g}_k) + \bar{g}_k) \cdot \text{std}(g_k) \cdot \alpha$$
+$$\boxed{
+\begin{aligned}
+y_k &= x_k + \sigma(\beta) \cdot (x_k - x_{k-1}) \quad &\text{(动量外推)} \\
+g_k &= A^T(A y_k - b) \quad &\text{(用当前 A 计算梯度)} \\
+\bar{g}_k &= (g_k - \mu_k) / \sigma_k \quad &\text{(逐坐标标准化，$\mu_k, \sigma_k$ 为坐标内统计量，无可学习参数)} \\
+\hat{g}_k &= (\text{MLP}(\bar{g}_k) + \bar{g}_k) \cdot \sigma_k \cdot \alpha \quad &\text{(共享 MLP + 残差 + 尺度恢复)} \\
+x_{k+1} &= \text{SoftThreshold}(y_k - \eta \cdot \hat{g}_k; \theta) \quad &\text{(软阈值)}
+\end{aligned}
+}$$
 
-MLP 仅作用于单个元素 (Linear(1,h)→...→Linear(h,1))，参数量与维度 n 无关。
+MLP 仅作用于单个元素 (Linear(1,h)→GELU→Linear(h,h)→GELU→Linear(h,1))，参数量与维度 n 无关。可学习参数包括 MLP 权重、步长 $\eta$、动量 $\beta$、缩放 $\alpha$、阈值 $\theta$。
 
 ### 3.4 序列模型
 
@@ -216,7 +224,8 @@ $$h_t = \text{MLP}(\bar{g}_t), \quad \text{attn} = \text{SelfAttn}([h_1, ..., h_
 
 **分析**：
 - LISTA 参数量最大 (60 万)，是 DA-LISTA 的 52 倍、RNN-LISTA 的 135 倍
-- 参数效率：DA-LISTA / 序列模型以极少参数实现最优精度，体现了逐元素共享架构的优势
+- 序列模型 (RNN/LSTM/Transformer) 以最少参数 (4.5K~5.6K) 实现最优精度，体现了逐元素共享架构的参数效率
+- DA-LISTA 参数量 (11.6K) 是序列模型的 2 倍，但其核心优势在于维度无关性（可跨维度推理），而非参数量少
 - LISTA-CP 通过耦合权重将参数量从 LISTA 的 60 万降到 20 万
 
 ### 4.4 评估指标
@@ -304,6 +313,8 @@ batch=32，T=10，n=200，CPU 取 50 次平均，GPU 取 100 次平均（含 CUD
 - RNN/LSTM 对噪声最鲁棒（仅增 10%）
 
 ### 5.2 不同展开层数对比
+
+*注：本节数据为单种子 (seed=42) 结果，与 §5.1 的三种子均值存在微小差异（如 T=10 时 LISTA: 0.756 vs 0.743）。*
 
 #### 5.2.1 无噪声条件
 
@@ -413,7 +424,7 @@ OOD 测试使用与训练不同的随机矩阵 A，评估模型对新字典的�
 ### 6.2 局限性
 
 1. **问题规模限制**：本实验 m=100, n=200, k=5 属于 well-posed 区，展开网络的优势可能在更困难的问题上更明显
-2. **训练样本量**：1000 样本对 LISTA (60 万参数) 可能不足，更多样本可能改善其性能
+2. **训练样本量**：1000 样本对 LISTA (60 万参数，单层含 $W_1 \in \mathbb{R}^{200 \times 100}$ 和 $W_2 \in \mathbb{R}^{200 \times 200}$) 可能不足，更多样本可能改善其性能
 3. **评估目标差异**：经典方法 (ISTA/FISTA) 优化 LASSO 目标函数 $\frac{1}{2}\|Ax-b\|^2 + \lambda\|x\|_1$，学习方法直接最小化 MSE($\hat{x}$, $x_{\text{true}}$)。两者统一用相对误差评估，但优化目标不同可能影响公平性
 4. **仅测试 LASSO 问题**：结论是否适用于其他逆问题有待验证
 
