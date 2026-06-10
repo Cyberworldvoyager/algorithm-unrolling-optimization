@@ -11,7 +11,6 @@ run_all_experiments.py — 全部模型的完整对比实验 (单一入口)
   2. 不同展开层数 T ∈ {5, 10, 20}
   3. 泛化性 (ID vs OOD：训练矩阵 A 之外的新 A)
   4. 跨维度泛化 (训练 n∈{100,150,200}，测试 n∈{50,100,200,300,400})——验证 DA-LISTA
-  5. W 矩阵谱分析 (数值结果写入 JSON)
   以上 1-3 在 无噪声 / 有噪声 两种条件下各跑一遍。
 
 设备: 自动选择 CUDA (若可用)，否则 CPU。
@@ -464,31 +463,6 @@ def run_cross_dimension():
 
 
 # ============================================================
-# 实验 5: W 矩阵谱分析 (数值写入 JSON)
-# ============================================================
-
-def analyze_W(trained_ref):
-    """对 LISTA-Momentum 各层有效变换矩阵 W=I+dW 做谱分析。"""
-    model = trained_ref['lista_momentum'][0]
-    rows = {}
-    for layer_idx in [0, 4, 9]:
-        if layer_idx >= len(model.layers):
-            continue
-        W = model.get_W_matrix(layer_idx).detach().cpu().numpy()
-        I = np.eye(W.shape[0])
-        eig = np.linalg.eigvals(W)
-        S = np.linalg.svd(W, compute_uv=False)
-        rows[str(layer_idx + 1)] = {
-            'cosine_with_I': float(np.sum(W * I) / (np.linalg.norm(W) * np.linalg.norm(I))),
-            'spectral_radius': float(np.max(np.abs(eig))),
-            'condition_number': float(S[0] / (S[-1] + 1e-10)),
-            'effective_rank': int(np.sum(S > 0.1 * S[0])),
-            'diff_from_I': float(np.linalg.norm(W - I)),
-        }
-    return rows
-
-
-# ============================================================
 # 可视化
 # ============================================================
 
@@ -538,27 +512,6 @@ def plot_cross_dim(cross, save='report/cross_dimension.png'):
     print(f"  跨维度图已保存到 {save}")
 
 
-def plot_W_matrix(trained_ref, save='report/W_matrix_analysis.png'):
-    model = trained_ref['lista_momentum'][0]
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    for idx, li in enumerate([0, 4, 9]):
-        if li >= len(model.layers):
-            break
-        W = model.get_W_matrix(li).detach().cpu().numpy()
-        ax = axes[0, idx]
-        im = ax.imshow(W, cmap='RdBu_r', aspect='auto', vmin=-0.5, vmax=0.5)
-        ax.set_title(f'Layer {li+1}: W = I + dW'); plt.colorbar(im, ax=ax)
-        ax = axes[1, idx]
-        eig = np.linalg.eigvals(W)
-        ax.scatter(eig.real, eig.imag, alpha=0.5, s=10)
-        th = np.linspace(0, 2*np.pi, 100)
-        ax.plot(np.cos(th), np.sin(th), 'r--', linewidth=1, label='Unit circle')
-        ax.set_aspect('equal'); ax.set_xlim(-2, 2); ax.set_ylim(-2, 2)
-        ax.set_title(f'Layer {li+1} Eigenvalues'); ax.legend()
-    plt.tight_layout(); plt.savefig(save, dpi=150, bbox_inches='tight'); plt.close()
-    print(f"  W 矩阵图已保存到 {save}")
-
-
 # ============================================================
 # 主流程
 # ============================================================
@@ -579,14 +532,6 @@ def main():
     t0 = time.time()
     results['cross_dimension'] = run_cross_dimension()
     timings['cross_dimension'] = round(time.time() - t0, 1)
-
-    # 实验 5: W 矩阵谱分析 (用 noiseless 的 Momentum 模型)
-    trained_ref = ref_holder['noiseless'][0]
-    results['W_analysis'] = analyze_W(trained_ref)
-    print("\n--- 实验 5: W 矩阵谱分析 ---")
-    for k, v in results['W_analysis'].items():
-        print(f"  Layer {k}: cos(I)={v['cosine_with_I']:.3f} "
-              f"rho={v['spectral_radius']:.3f} rank={v['effective_rank']}")
 
     # 参数量统计 (T=10, n=200, m=100)
     param_counts = {}
@@ -641,7 +586,6 @@ def main():
     print("\n--- 生成图表 ---")
     plot_comparison(results)
     plot_cross_dim(results['cross_dimension'])
-    plot_W_matrix(trained_ref)
 
     with open('all_experiment_results.json', 'w') as f:
         json.dump(results, f, indent=2)

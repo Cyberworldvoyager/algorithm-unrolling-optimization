@@ -36,7 +36,6 @@ project/
 │   ├── new_report.md               # 最终实验报告
 │   ├── training_comparison.png     # 全模型对比 / 层数影响
 │   ├── cross_dimension.png         # 跨维度泛化
-│   ├── W_matrix_analysis.png       # LISTA-Momentum 的 W 矩阵分析
 │   ├── optimization_trajectory_3d.png  # 优化轨迹 (PCA 投影 3D)
 │   └── optimization_trajectory_2d.png  # 优化轨迹 (PCA 投影 2D 等高线)
 ├── models/                         # 训练好的模型权重 (运行后生成)
@@ -68,7 +67,7 @@ pip install -r requirements.txt
 python run_all_experiments.py
 ```
 
-脚本会自动选择 GPU（若 `torch.cuda.is_available()`）否则 CPU，依次完成：全模型对比 (T=10, m=100, n=200, k=5)、不同 T∈{5,10,20}、ID/OOD 泛化、跨维度泛化 (训练 n∈{100,150,200}，测试 n∈{50,100,200,300,400})、W 矩阵谱分析、参数量统计，并将结果写入 `all_experiment_results.json`、图表写入 `report/`、模型权重写入 `models/`。
+脚本会自动选择 GPU（若 `torch.cuda.is_available()`）否则 CPU，依次完成：全模型对比 (T=10, m=100, n=200, k=5)、不同 T∈{5,10,20}、ID/OOD 泛化、跨维度泛化 (训练 n∈{100,150,200}，测试 n∈{50,100,200,300,400})、参数量统计，并将结果写入 `all_experiment_results.json`、图表写入 `report/`、模型权重写入 `models/`。
 
 训练配置：1000 样本、最多 50 轮、Adam lr=1e-3、15% 验证集 + 早停 (patience=15)、3 种子。展开网络 (LISTA/CP/Momentum) 采用 ISTA 等价初始化。
 
