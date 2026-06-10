@@ -37,8 +37,8 @@ project/
 │   ├── training_comparison.png     # 全模型对比 / 层数影响
 │   ├── cross_dimension.png         # 跨维度泛化
 │   ├── W_matrix_analysis.png       # LISTA-Momentum 的 W 矩阵分析
-│   ├── optimization_trajectory_3d.png  # 2D 优化轨迹 (3D)
-│   └── optimization_trajectory_2d.png  # 2D 优化轨迹 (等高线)
+│   ├── optimization_trajectory_3d.png  # 优化轨迹 (PCA 投影 3D)
+│   └── optimization_trajectory_2d.png  # 优化轨迹 (PCA 投影 2D 等高线)
 ├── models/                         # 训练好的模型权重 (运行后生成)
 │   └── *_noiseless.pt
 ├── common/                         # 公共工具
