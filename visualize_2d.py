@@ -208,25 +208,28 @@ def collect_transformer(model, A, b, T):
 # ============================================================
 
 @torch.no_grad()
-def measure_inference_time(model, A_np, B_np, needs_A, n_runs=50):
+def measure_inference_time(model, A_np, B_np, needs_A, n_runs=50, device='cpu'):
     """测量模型在 n_runs 次前向传播上的平均推理时间 (ms)。"""
-    model.eval()
-    A = torch.from_numpy(A_np).to('cpu')
-    B = torch.from_numpy(B_np).to('cpu')
+    model.eval().to(device)
+    A = torch.from_numpy(A_np).to(device)
+    B = torch.from_numpy(B_np).to(device)
     # 预热
     for _ in range(5):
         model(B, A) if needs_A else model(B)
+    if device.type == 'cuda':
+        torch.cuda.synchronize()
     t0 = time.perf_counter()
     for _ in range(n_runs):
         model(B, A) if needs_A else model(B)
+    if device.type == 'cuda':
+        torch.cuda.synchronize()
     elapsed = (time.perf_counter() - t0) / n_runs * 1000  # ms
     return elapsed
 
 
 def measure_classical_time(A_np, B_np, T, n_runs=20):
-    """测量经典方法的推理时间。"""
+    """测量经典方法的推理时间 (仅 CPU，numpy 循环)。"""
     lam = 0.01 * np.max(np.abs(A_np.T @ B_np[0]))
-    # 预热
     for i in range(3):
         ista(A_np, B_np[i], lam, max_iter=T)
         fista(A_np, B_np[i], lam, max_iter=T)
@@ -409,16 +412,25 @@ def main():
     # 推理时间测量
     print("\n测量推理时间...")
     B_batch = np.random.randn(32, M).astype(np.float32)
+    has_gpu = torch.cuda.is_available()
+    gpu_name = torch.cuda.get_device_name(0) if has_gpu else 'N/A'
+
     t_ista_ms, t_fista_ms = measure_classical_time(A, B_batch, T, n_runs=20)
-    inf_times['ista'] = round(t_ista_ms, 2)
-    inf_times['fista'] = round(t_fista_ms, 2)
-    print(f"  {'ISTA':18s}: {t_ista_ms:.2f} ms/batch (32 samples)")
-    print(f"  {'FISTA':18s}: {t_fista_ms:.2f} ms/batch (32 samples)")
+    inf_times['ista'] = {'cpu': round(t_ista_ms, 2)}
+    inf_times['fista'] = {'cpu': round(t_fista_ms, 2)}
+    print(f"  {'ISTA':18s} CPU: {t_ista_ms:.2f} ms")
+    print(f"  {'FISTA':18s} CPU: {t_fista_ms:.2f} ms")
 
     for name, model, needs_A, _, label, _ in model_info:
-        t_ms = measure_inference_time(model, A, B_batch, needs_A, n_runs=50)
-        inf_times[name] = round(t_ms, 2)
-        print(f"  {label:18s}: {t_ms:.2f} ms/batch (32 samples)")
+        t_cpu = measure_inference_time(model, A, B_batch, needs_A, n_runs=50, device=torch.device('cpu'))
+        entry = {'cpu': round(t_cpu, 2)}
+        msg = f"  {label:18s} CPU: {t_cpu:.2f} ms"
+        if has_gpu:
+            t_gpu = measure_inference_time(model, A, B_batch, needs_A, n_runs=100, device=torch.device('cuda'))
+            entry['gpu'] = round(t_gpu, 2)
+            msg += f"  |  GPU ({gpu_name}): {t_gpu:.2f} ms"
+        inf_times[name] = entry
+        print(msg)
 
     # 绘图
     print("\n生成可视化...")
@@ -434,9 +446,17 @@ def main():
         err = float(np.linalg.norm(x_true - traj[-1]) / (np.linalg.norm(x_true) + 1e-10))
         print(f"  {lab:18s}: {err:.4f}")
 
-    print("\n推理时间 (ms/batch, 32 samples):")
-    for name, t in inf_times.items():
-        print(f"  {name:18s}: {t:.2f} ms")
+    print(f"\n推理时间 (ms/batch, 32 samples, T={T}, n={N}):")
+    header = f"  {'方法':18s}  {'CPU':>10s}"
+    if has_gpu:
+        header += f"  {'GPU':>10s}  {'GPU型号':s}"
+    print(header)
+    print("  " + "-" * 60)
+    for name, entry in inf_times.items():
+        line = f"  {name:18s}  {entry['cpu']:>8.2f}ms"
+        if 'gpu' in entry:
+            line += f"  {entry['gpu']:>8.2f}ms  {gpu_name}"
+        print(line)
 
     print("\n完成!")
     return inf_times
